@@ -125057,6 +125057,7 @@ components.voidsbaneV3 = function(context)
                 local elapsed=age-ring.launch
                 local life=ring.life or timing.ringLife
                 local released=ring.stand and p.releaseAt and t>=p.releaseAt+(timing.standFade or 0.8)
+                if elapsed<0 and elapsed>=-0.5 and not ring.stand then best=math.max(best,disc(x,z,p.origin,5,pad)) end
                 if not released and elapsed>=0 and elapsed<= (ring.stand and (ring.standMax or life) or life) then
                     local r=0
                     local a=ring.stand and math.min(elapsed,life) or elapsed
@@ -125086,7 +125087,7 @@ components.voidsbaneV3 = function(context)
                             if number(opening) and math.abs((angle-opening+math.pi)%(2*math.pi)-math.pi)<half then door=true; break end
                         end
                     end
-                    if not door and r>timing.doorHalfWidth then
+                    if not door then
                         best=math.max(best,pad+1.5-math.abs(distance(x,z,p.origin)-r))
                     end
                 end
@@ -125163,8 +125164,9 @@ components.voidsbaneV3 = function(context)
             for i,bar in ipairs(p.bars) do
                 local elapsed=t-p.t0-(i-1)*c.step
                 local purple=c.blinkAt and c.blink and elapsed>=c.warn+c.blinkAt+0.08 and elapsed<c.warn+c.blinkAt+c.blink-0.15
+                if purple and cfg.gsV3Visual~=false and visual.barHot and (t-(state.queryNow or world:GetServerTimeNow()))<=0.4 and visual.barHot(bar.c) then purple=false end
                 if not purple and elapsed>=c.warn-0.6 and elapsed<=c.warn+c.live then
-                    best=math.max(best,lane(x,z,bar.c,bar.d,c.length,c.hitHalf and c.hitHalf*2 or c.width,true,pad))
+                    best=math.max(best,lane(x,z,bar.c,bar.d,c.length,c.hitHalf and c.hitHalf*2 or c.width,true,pad+1.5))
                 end
             end
             return best
@@ -125234,6 +125236,8 @@ components.voidsbaneV3 = function(context)
         visual.at=clock
         local shapes={}
         visual.shapes=shapes
+        local beamList={}
+        visual.beamList=beamList
         local effects=world:FindFirstChild('voidsbaneV3Effects')
         if not effects then visual.glyphW=nil return end
         local gg=effects:FindFirstChild('glyphGlow')
@@ -125267,7 +125271,8 @@ components.voidsbaneV3 = function(context)
                 local node=part
                 while node.Parent and node.Parent~=effects do node=node.Parent end
                 local cname=node.Name:lower()
-                if cname~='glyphglow' and cname~='passive' and part.Transparency<0.95 and part.Size.Magnitude>=1.5 then
+                if part.Parent and part.Parent.Name:lower()=='bars' then cname='bars' end
+                if cname~='glyphglow' and (cname~='passive' or part.Name:lower()=='precast') and (part.Transparency<0.95 or part.Name:lower()=='hitbox') and part.Size.Magnitude>=1.5 then
                     local pos=part.Position
                     local tr=visual.track[part]
                     if not tr then
@@ -125285,6 +125290,13 @@ components.voidsbaneV3 = function(context)
                     if math.sqrt(vx*vx+vz*vz)<0.3 then vx,vz=0,0 end
                     local hs=hueState(part.Color)
                     if hs~=tr.cs then tr.cs,tr.cat=hs,clock end
+                    if cname=='beams' then
+                        local sB,cfB=part.Size,part.CFrame
+                        local axB=(sB.X>=sB.Y and sB.X>=sB.Z) and cfB.RightVector or ((sB.Y>=sB.Z) and cfB.UpVector or cfB.LookVector)
+                        local fm=math.sqrt(axB.X*axB.X+axB.Z*axB.Z)
+                        if fm>0.2 then beamList[#beamList+1]={x=pos.X,z=pos.Z,dx=axB.X/fm,dz=axB.Z/fm,hs=hs} end
+                        if hs=='green' then visual.greenAt=clock end
+                    end
                     local age=clock-(tr.cat or clock)
                     local extra=0
                     local active=true
@@ -125368,6 +125380,118 @@ components.voidsbaneV3 = function(context)
         return math.clamp((w-base)/math.max(0.2,0.9-base),0,1.2)
     end
     context.v3GlyphWhite=glyphWhite
+    visual.barHot=function(center)
+        refreshVisual()
+        for _,sh in ipairs(visual.shapes) do
+            if sh.cname=='bars' and sh.k=='obb' and distance(sh.cx,sh.cz,center)<5 then return true end
+        end
+        return false
+    end
+    visual.photon=function()
+        refreshVisual()
+        local list=visual.beamList or {}
+        local clock=os.clock()
+        if #list==0 then
+            if clock-(visual.photonSeenAt or -99)>2 then return nil end
+        else
+            visual.photonSeenAt=clock
+            local a11,a12,a22,b1,b2,mx,mz=0,0,0,0,0,0,0
+            for _,b in ipairs(list) do
+                local nx,nz=-b.dz,b.dx
+                a11+=nx*nx; a12+=nx*nz; a22+=nz*nz
+                local d=nx*b.x+nz*b.z
+                b1+=nx*d; b2+=nz*d
+                mx+=b.x; mz+=b.z
+            end
+            local n=#list
+            mx=mx/n; mz=mz/n
+            local det=a11*a22-a12*a12
+            local cx,cz=mx,mz
+            if n>=2 and det>0.05*n*n then
+                cx=(b1*a22-b2*a12)/det
+                cz=(a11*b2-a12*b1)/det
+            end
+            local ref=(context.v3BossPoint and context.v3BossPoint()) or (state.passive and state.passive.glyph)
+            if vector(ref) and distance(cx,cz,ref)>(context.v3ArenaRadius()+30) then cx,cz=mx,mz end
+            visual.photonCentre=Vector3.new(cx,0,cz)
+        end
+        if not visual.photonCentre then return nil end
+        local leaveFor=tonumber(cfg.gsV3PhotonLeaveFor) or 6
+        return {centre=visual.photonCentre,green=(visual.greenAt~=nil and clock-visual.greenAt<leaveFor),count=#list}
+    end
+    visual.markedYellow=function()
+        local clock=os.clock()
+        if clock-(visual.markAt or -1)<0.15 then return visual.markVal end
+        visual.markAt=clock
+        local val=false
+        local char=context.LocalPlayer and context.LocalPlayer.Character
+        if char then
+            for _,d in ipairs(char:GetDescendants()) do
+                if d:IsA('Highlight') and d.Enabled then
+                    local h1,s1=d.FillColor:ToHSV()
+                    local h2,s2=d.OutlineColor:ToHSV()
+                    if (h1>0.1 and h1<0.19 and s1>0.5) or (h2>0.1 and h2<0.19 and s2>0.5) then val=true break end
+                end
+            end
+        end
+        visual.markVal=val
+        return val
+    end
+    -- open lane: longest straight corridor from here that stays clear while we run it
+    local function gapCruise(pos)
+        local speed=math.max(16,rt.speedNow or 20)
+        local heading=(context.MV and context.MV.cmdDir) or Vector3.zero
+        local bossP=context.v3BossPoint and context.v3BossPoint()
+        local maxR=context.v3ArenaRadius()
+        local bestDir,bestLen,bestScore=nil,0,-math.huge
+        for i=0,15 do
+            local ang=i*math.pi/8
+            local dir=Vector3.new(math.cos(ang),0,math.sin(ang))
+            local len=0
+            for step=1,10 do
+                local d=step*3
+                local px,pz=pos.X+dir.X*d,pos.Z+dir.Z*d
+                if vector(bossP) and distance(px,pz,bossP)>maxR then break end
+                if context.v3DangerAt(px,pos.Y,pz,d/speed+0.15)>=2 then break end
+                len=d
+            end
+            local score=len
+            if heading.Magnitude>0.1 then score+=dir:Dot(heading.Unit)*6 end
+            if vector(bossP) then
+                local toB=Vector3.new(bossP.X-pos.X,0,bossP.Z-pos.Z)
+                if toB.Magnitude>1 then score-=math.abs(dir:Dot(toB.Unit))*8 end
+            end
+            if score>bestScore then bestDir,bestLen,bestScore=dir,len,score end
+        end
+        if bestDir and bestLen>=6 then return pos+bestDir*math.min(bestLen,27) end
+        return nil
+    end
+    -- stand on the centre unless something is about to cross it; then take the best nearby spot
+    local function safeNear(centre,pos)
+        local speed=math.max(16,rt.speedNow or 20)
+        local best,bestScore=nil,math.huge
+        for _,r in ipairs({0,5,9,14}) do
+            local n=(r==0) and 1 or 8
+            for i=0,n-1 do
+                local ang=i*2*math.pi/n
+                local cand=Vector3.new(centre.X+math.cos(ang)*r,centre.Y,centre.Z+math.sin(ang)*r)
+                local travel=distance(pos.X,pos.Z,cand)/speed
+                local danger=0
+                for _,t in ipairs({0,0.5,1.0,1.5,2.0}) do
+                    danger+=math.max(0,context.v3DangerAt(cand.X,cand.Y,cand.Z,travel+t))
+                end
+                local score=danger*8+r*0.8+travel*3
+                if score<bestScore then best,bestScore=cand,score end
+            end
+        end
+        return best
+    end
+    local function photonBlast()
+        for _,h in ipairs(state.plans) do
+            if h.kind=='Beams' and h.p.cfg and number(h.p.cfg.blastRadius) then return h.p.cfg.blastRadius end
+        end
+        return tonumber(cfg.gsV3PhotonBlast) or 24
+    end
     context.v3DangerAt = function(x,y,z,offset)
         local now=state.queryNow or world:GetServerTimeNow()
         local best, name=0,nil
@@ -125779,11 +125903,15 @@ components.voidsbaneV3 = function(context)
         local centre=(state.passive and state.passive.glyph) or nil
         local anchor=context.v3BossAnchor(14)
         local target=(not glyphLegacy() and vector(centre)) and centre or (vector(anchor) and anchor or (vector(centre) and centre or nil))
+        if vector(target) and not glyphLegacy() and context.character then
+            local _,_,rootW=context.character()
+            if rootW then target=safeNear(target,rootW.Position) or target end
+        end
         -- Never route back to the dungeon's starting spawn or a previous room.
         if not vector(target) or not vector(active.point) then return nil end
         if distance(target.X,target.Z,active.point)>350 or math.abs(target.Y-active.point.Y)>35 then return nil end
         state.lastWallAt=now
-        return target,tonumber(cfg.gsV3WallRetreatRadius) or 12
+        return target,tonumber(cfg.gsV3WallRetreatRadius) or 6
     end
     local sourcePhases=setmetatable({},{__mode='k'})
     local phaseKinds={lance='Lance',meteor='MeteorLock',meteororbs='MeteorOrbs',meteorline='MeteorLine',
@@ -125867,6 +125995,48 @@ components.voidsbaneV3 = function(context)
             awayTop=awayTop.Magnitude>0.01 and awayTop.Unit or Vector3.xAxis
             return glyphTop+awayTop*70,4,'white explosion: clear the glyph'
         end
+        local whiteNow=(not glyphLegacy()) and glyphWhite() or 0
+        -- Photon Supercharge: follow the beams in, then leave the moment they turn green.
+        if cfg.gsV3PhotonVisual~=false then
+            local ph=visual.photon()
+            if ph then
+                local centre=Vector3.new(ph.centre.X,pos.Y,ph.centre.Z)
+                if ph.green then
+                    local ex=visual.exit
+                    if not ex or os.clock()-ex.at>0.7 or context.v3DangerAt(ex.p.X,ex.p.Y,ex.p.Z,0.8)>=3 then
+                        local blast=photonBlast()
+                        local bossP=context.v3BossPoint()
+                        local maxR=context.v3ArenaRadius()
+                        local best,bs=nil,math.huge
+                        for _,R in ipairs({blast+8,blast+16}) do
+                            for i=0,15 do
+                                local ang=i*math.pi/8
+                                local cand=Vector3.new(centre.X+math.cos(ang)*R,pos.Y,centre.Z+math.sin(ang)*R)
+                                local score=distance(pos.X,pos.Z,cand)*0.25
+                                for _,t in ipairs({0.6,1.2,1.8,2.4}) do
+                                    score+=context.v3DangerAt(cand.X,cand.Y,cand.Z,t)*3
+                                end
+                                if vector(bossP) then
+                                    score+=distance(cand.X,cand.Z,bossP)*0.08
+                                    if distance(cand.X,cand.Z,bossP)>maxR then score+=100 end
+                                end
+                                if score<bs then best,bs=cand,score end
+                            end
+                        end
+                        visual.exit={at=os.clock(),p=best or (centre+Vector3.new(blast+8,0,0))}
+                        ex=visual.exit
+                    end
+                    return ex.p,3,'photon green: leave before the explosion'
+                elseif not state.beamLock and ph.count>0 then
+                    return centre,4,'photon: follow the beams to the centre'
+                end
+            end
+        end
+        -- Mega Flame Barrage: marked players keep running down an open lane.
+        if whiteNow<0.9 and visual.markedYellow() then
+            local lane=gapCruise(pos)
+            if lane then return lane,2,'breath marked: run the open lane' end
+        end
         if not glyphLegacy() then
             -- Wiki rule: stand on the centre art often enough that the Lumenflame never turns white.
             local glyphW=(state.passive and vector(state.passive.glyph) and state.passive.glyph) or (visual.glyphW and visual.glyphPos) or nil
@@ -125874,12 +126044,12 @@ components.voidsbaneV3 = function(context)
                 if distance(pos.X,pos.Z,glyphW)<=(tonumber(cfg.gsV3GlyphRadius) or 9) then state.lastOnGlyph=now end
                 state.lastOnGlyph=state.lastOnGlyph or now
                 local away=now-state.lastOnGlyph
-                local white=glyphWhite()
-                if white>=0.9 then
-                    return glyphW,3,'glyph white: stand on the centre'
+                if whiteNow>=0.9 then
+                    return safeNear(glyphW,pos) or glyphW,3,'glyph white: stand on the centre'
                 end
-                if (white>=0.45 or away>(tonumber(cfg.gsV3GlyphMaxAway) or 10)) and glyphRouteSafe(glyphW) then
-                    return glyphW,3,'glyph whitening: back to the centre'
+                if whiteNow>=0.45 or away>(tonumber(cfg.gsV3GlyphMaxAway) or 10) then
+                    local spot=safeNear(glyphW,pos)
+                    if spot and glyphRouteSafe(spot) then return spot,3,'glyph whitening: back to the centre' end
                 end
             end
         end
@@ -126347,6 +126517,11 @@ components.voidsbaneV3 = function(context)
                         elseif nextKind=='Beams' then
                             prep=state.passive and state.passive.glyph or nil
                         elseif nextKind=='Breathe' then
+                            local lane=gapCruise(pos)
+                            if lane then
+                                state.predictedNext=nextKind
+                                return lane,2,'breath incoming: run the open lane'
+                            end
                             local bossAway=context.v3BossPoint()
                             if vector(bossAway) then
                                 local out=Vector3.new(pos.X-bossAway.X,0,pos.Z-bossAway.Z)
