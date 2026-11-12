@@ -1,4 +1,5 @@
 -- Roblox Luau | Dungeon Quest Reborn autofarm | Voidsbane patch r14
+-- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
 -- Voidsbane: Roblox PathfindingService for dodging + boss approach, plain humanoid walking inside gsV3PathSwitchDist.
 -- Save as workspace/HarvardLabs/autofarm-working.luau so the teleport reload below loads this copy.
 -- Reload this installed copy after dungeon teleports and replay.
@@ -124771,32 +124772,10 @@ components.voidsbaneV3 = function(context)
     local world, cfg, rt = context.Workspace, context.CFG, context.RT
     local state = { plans = {}, events = {}, counts = {}, lastPlans = {}, malformed = 0,owned={} }
     rt.voidsbaneV3 = state
-    local attemptWebhook="https://discord.com/api/webhooks/1570084381022888067/nbGayjcrjIs3MLoWtbf36LM7m4cfYBvvOx9HAXcjjXVxgyhdKurSm1D4VUmzdXpusq27"
-    context.v3PostAttempt=function()
-        if cfg.gsV3Webhook==false then return end
-        local a=state.attempt
-        if not a or state.webhookFor==a then return end
-        state.webhookFor=a
-        local maxHp=tonumber(a.maxHp) or 0
-        local left=tonumber(a.lastHp) or 0
-        local pct=maxHp>0 and (left/maxHp*100) or 0
-        local text=("Voidsbane %s - %.1f%% boss HP left (%.1fQ / %.1fQ) - %d deaths / %d hits - %.0fs - job %s"):format(
-            tostring(a.status),pct,left/1e15,maxHp/1e15,tonumber(a.deaths) or 0,tonumber(a.hits) or 0,
-            math.max(0,(tonumber(a.endedAt) or 0)-(tonumber(a.startedAt) or 0)),tostring(game.JobId))
-        pcall(function()
-            local body=getService("HttpService"):JSONEncode({content=text})
-            local req=(type(getgenv)=="function" and (getgenv().request or getgenv().http_request)) or nil
-            if type(req)~="function" then req=request end
-            if type(req)=="function" then
-                local res=req({Url=attemptWebhook,Method="POST",Headers={["Content-Type"]="application/json"},Body=body})
-                state.webhookStatus=tostring(type(res)=="table" and (res.StatusCode or res.Status) or res)
-                state.webhookAt=os.clock()
-                print("[V3 webhook] "..tostring(state.webhookStatus))
-            else
-                print("[V3 webhook] no http function available")
-            end
-        end)
-    end
+    -- merge r1: visual hazard layer + wiki glyph rule. gsV3Visual=false / gsV3GlyphMode='legacy' restore the old behaviour.
+    local visual={shapes={},at=-1,track=setmetatable({},{__mode='k'}),burstUntil=0,glyphBase=nil,glyphW=nil,glyphPos=nil,seen={}}
+    local function glyphLegacy() return cfg.gsV3GlyphMode=='legacy' end
+    context.v3PostAttempt=function() end
     if type(getgenv)=='function' then getgenv().PelicanContext=context end
     local function vector(v) return typeof(v) == "Vector3" end
     local function number(v) return type(v) == "number" and v == v and math.abs(v) < 1e12 end
@@ -124851,7 +124830,7 @@ components.voidsbaneV3 = function(context)
             plan = summarize(p, event=='Beams' and 6 or 4), a = summarize(a, 2), b = summarize(b, 1), d = summarize(d, 1) }
         state.events[#state.events + 1] = record
         state.lastPlans[event]=record
-        if event=='RuneSync' and number(p) and number(a) then
+        if event=='RuneSync' and glyphLegacy() and number(p) and number(a) then
             -- Live payload is (value, rate); there is no timestamp argument.
             -- Requiring one silently disabled the whole rune/glyph mechanic.
             state.rune={value=p,rate=a,at=number(b) and b or now,max=d}
@@ -124868,6 +124847,7 @@ components.voidsbaneV3 = function(context)
             state.breath, state.melee, state.meteor = nil, nil, nil
             state.meteorFollowup=nil
             state.passive,state.rune,state.refilling=nil,nil,nil
+            visual.glyphBase,state.lastOnGlyph=nil,nil
             state.runeNuke=nil
             state.lastKind=nil
             state.lastKindAt=nil
@@ -124887,7 +124867,7 @@ components.voidsbaneV3 = function(context)
             end
         end
         if type(p) ~= "table" then
-            if event=='RuneNuke' and number(p) then
+            if event=='RuneNuke' and glyphLegacy() and number(p) then
                 -- p is the resolve time of the white explosion.
                 state.runeNuke=p
             end
@@ -124917,7 +124897,7 @@ components.voidsbaneV3 = function(context)
                 state.breathStart=p.t0
                 state.breathUntil=p.t0+lastLaunch+timingB.breathFlight+0.6
             end
-        elseif event=='Passive' then state.passive=p
+        elseif event=='Passive' then state.passive=p; state.lastOnGlyph=world:GetServerTimeNow(); visual.glyphBase=nil
         elseif event == "Melee" then state.melee = p
         elseif event == "Meteor" then state.meteor = p
         elseif event=='Lance' and vector(p.origin) and number(p.t0) and p.timing and type(p.rings)=='table' then
@@ -125239,6 +125219,155 @@ components.voidsbaneV3 = function(context)
         end
         return 0
     end
+
+    -- ===== merge r1: live hazard layer =====
+    local function hueState(c)
+        local h,sat,val=c:ToHSV()
+        if h>0.69 and h<0.91 and sat>0.30 and val>0.25 then return 'purple' end
+        if h>0.25 and h<0.5 and sat>0.30 and val>0.20 then return 'green' end
+        return 'hot'
+    end
+    local GAP_CONTAINERS={bars=true,xspin=true,lance=true,sweep=true}
+    local function refreshVisual()
+        local clock=os.clock()
+        if clock-visual.at<0.06 then return end
+        visual.at=clock
+        local shapes={}
+        visual.shapes=shapes
+        local effects=world:FindFirstChild('voidsbaneV3Effects')
+        if not effects then visual.glyphW=nil return end
+        local gg=effects:FindFirstChild('glyphGlow')
+        if gg then
+            local sum,n=0,0
+            local list=gg:IsA('BasePart') and {gg} or gg:GetDescendants()
+            for _,q in ipairs(list) do
+                if q:IsA('BasePart') and q.Transparency<0.9 then
+                    local c=q.Color
+                    sum+=math.min(c.R,c.G,c.B); n+=1
+                end
+            end
+            if n>0 then
+                local w=sum/n
+                visual.glyphW=w
+                visual.glyphBase=visual.glyphBase and math.min(visual.glyphBase,w) or w
+            end
+            local ok,piv=pcall(function() return gg:IsA('Model') and gg:GetPivot().Position or gg.Position end)
+            if ok and vector(piv) then visual.glyphPos=piv end
+        else
+            visual.glyphW=nil
+        end
+        local pad=tonumber(cfg.gsV3Pad) or 3
+        local purpleSafe=tonumber(cfg.gsV3PurpleSafe) or 2.4
+        local greenSafe=tonumber(cfg.gsV3GreenSafe) or 2.0
+        local count=0
+        for _,part in ipairs(effects:GetDescendants()) do
+            if part:IsA('BasePart') then
+                count+=1
+                if count>500 then break end
+                local node=part
+                while node.Parent and node.Parent~=effects do node=node.Parent end
+                local cname=node.Name:lower()
+                if cname~='glyphglow' and cname~='passive' and part.Transparency<0.95 and part.Size.Magnitude>=1.5 then
+                    local pos=part.Position
+                    local tr=visual.track[part]
+                    if not tr then
+                        tr={pos=pos,t=clock,vx=0,vz=0}
+                        visual.track[part]=tr
+                    else
+                        local dt=clock-tr.t
+                        if dt>0.03 then
+                            tr.vx=tr.vx*0.4+((pos.X-tr.pos.X)/dt)*0.6
+                            tr.vz=tr.vz*0.4+((pos.Z-tr.pos.Z)/dt)*0.6
+                            tr.pos,tr.t=pos,clock
+                        end
+                    end
+                    local vx,vz=tr.vx,tr.vz
+                    if math.sqrt(vx*vx+vz*vz)<0.3 then vx,vz=0,0 end
+                    local hs=hueState(part.Color)
+                    if hs~=tr.cs then tr.cs,tr.cat=hs,clock end
+                    local age=clock-(tr.cat or clock)
+                    local extra=0
+                    local active=true
+                    if hs=='purple' then
+                        if age<=purpleSafe then active=false end
+                    elseif hs=='green' then
+                        tr.greenSeen=true
+                        if age<=greenSafe then active=false end
+                    elseif tr.greenSeen then
+                        extra=5
+                        visual.burstUntil=clock+8
+                    end
+                    if active and cname=='beams' and hs=='hot' and clock<visual.burstUntil then extra=math.max(extra,5) end
+                    if active then
+                        local s=part.Size
+                        local cf=part.CFrame
+                        local rv,uv,lv=cf.RightVector,cf.UpVector,cf.LookVector
+                        local hy=math.abs(rv.Y)*s.X/2+math.abs(uv.Y)*s.Y/2+math.abs(lv.Y)*s.Z/2
+                        local shape={cname=cname,gap=GAP_CONTAINERS[cname]==true,cx=pos.X,cz=pos.Z,y=pos.Y,hy=hy,vx=vx,vz=vz,extra=extra}
+                        local ball=part:IsA('Part') and part.Shape~=Enum.PartType.Block
+                        if ball then
+                            shape.k='circle'
+                            shape.r=((part.Shape==Enum.PartType.Cylinder) and math.max(s.Y,s.Z) or math.max(s.X,s.Y,s.Z))/2
+                            if shape.r*2<=45 then shapes[#shapes+1]=shape end
+                        else
+                            shape.k='obb'
+                            if math.abs(uv.Y)>0.9 then
+                                local ax,az=rv.X,rv.Z
+                                local am=math.sqrt(ax*ax+az*az)
+                                local bx,bz=lv.X,lv.Z
+                                local bm=math.sqrt(bx*bx+bz*bz)
+                                if am>0.001 and bm>0.001 then
+                                    shape.ax,shape.az,shape.bx,shape.bz=ax/am,az/am,bx/bm,bz/bm
+                                    shape.hx,shape.hz=s.X/2,s.Z/2
+                                end
+                            else
+                                shape.ax,shape.az,shape.bx,shape.bz=1,0,0,1
+                                shape.hx=math.abs(rv.X)*s.X/2+math.abs(uv.X)*s.Y/2+math.abs(lv.X)*s.Z/2
+                                shape.hz=math.abs(rv.Z)*s.X/2+math.abs(uv.Z)*s.Y/2+math.abs(lv.Z)*s.Z/2
+                            end
+                            if shape.hx and not (shape.hx*2>45 and shape.hz*2>45) then
+                                shapes[#shapes+1]=shape
+                            elseif shape.hx and cfg.gsV3VisualDebug and not visual.seen[part] then
+                                visual.seen[part]=true
+                                warn('[v3 visual] skipped large part',part:GetFullName(),s)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local function visualDepth(x,y,z,offset,pad,gapsOnly)
+        refreshVisual()
+        local dt=math.max(0,offset or 0)+(os.clock()-visual.at)
+        local best,name=0,nil
+        for _,sh in ipairs(visual.shapes) do
+            if (not gapsOnly or sh.gap) and math.abs(y-sh.y)<=sh.hy+6 then
+                local cx,cz=sh.cx+sh.vx*dt,sh.cz+sh.vz*dt
+                local m=pad+sh.extra+1.2*dt
+                local d
+                if sh.k=='circle' then
+                    local dx,dz=x-cx,z-cz
+                    d=sh.r+m-math.sqrt(dx*dx+dz*dz)
+                else
+                    local dx,dz=x-cx,z-cz
+                    local u=dx*sh.ax+dz*sh.az
+                    local v=dx*sh.bx+dz*sh.bz
+                    d=math.min(sh.hx+m-math.abs(u),sh.hz+m-math.abs(v))
+                end
+                if d>best then best,name=d,'visual:'..sh.cname end
+            end
+        end
+        return best,name
+    end
+    -- 0 = glyph at its resting colour, 1 = fully white
+    local function glyphWhite()
+        refreshVisual()
+        local w,base=visual.glyphW,visual.glyphBase
+        if not w or not base then return 0 end
+        return math.clamp((w-base)/math.max(0.2,0.9-base),0,1.2)
+    end
+    context.v3GlyphWhite=glyphWhite
     context.v3DangerAt = function(x,y,z,offset)
         local now=state.queryNow or world:GetServerTimeNow()
         local best, name=0,nil
@@ -125249,6 +125378,10 @@ components.voidsbaneV3 = function(context)
             if gauge>=0.7*cap and distance(x,z,state.passive.glyph)<14 then
                 best,name=6,'Charged glyph'
             end
+        end
+        if cfg.gsV3Dodge ~= false and cfg.gsV3Visual ~= false then
+            local vd,vn=visualDepth(x,y,z,offset,tonumber(cfg.gsV3Pad) or 3)
+            if vd>best then best,name=vd,vn end
         end
         if cfg.gsV3Dodge == false or #state.plans==0 then return best,name end
         for i=#state.plans,1,-1 do
@@ -125273,6 +125406,14 @@ components.voidsbaneV3 = function(context)
                     nearest=math.min(nearest,clearance);total+=clearance/influence;count+=1
                     pressure+=1/(1+clearance)^2
                 end
+            end
+        end
+        if cfg.gsV3Visual ~= false and cfg.gsV3Dodge ~= false then
+            local vd=visualDepth(point.X,point.Y,point.Z,math.max(0,offset or 0),influence+(tonumber(cfg.gsV3Pad) or 3),gapsOnly)
+            if vd>0 then
+                local clearance=math.clamp(influence-vd,0,influence)
+                nearest=math.min(nearest,clearance);total+=clearance/influence;count+=1
+                pressure+=1/(1+clearance)^2
             end
         end
         return nearest,total,count,pressure
@@ -125637,7 +125778,7 @@ components.voidsbaneV3 = function(context)
         -- Hold the boss side instead.
         local centre=(state.passive and state.passive.glyph) or nil
         local anchor=context.v3BossAnchor(14)
-        local target=vector(anchor) and anchor or (vector(centre) and centre or nil)
+        local target=(not glyphLegacy() and vector(centre)) and centre or (vector(anchor) and anchor or (vector(centre) and centre or nil))
         -- Never route back to the dungeon's starting spawn or a previous room.
         if not vector(target) or not vector(active.point) then return nil end
         if distance(target.X,target.Z,active.point)>350 or math.abs(target.Y-active.point.Y)>35 then return nil end
@@ -125725,6 +125866,22 @@ components.voidsbaneV3 = function(context)
             local awayTop=Vector3.new(pos.X-glyphTop.X,0,pos.Z-glyphTop.Z)
             awayTop=awayTop.Magnitude>0.01 and awayTop.Unit or Vector3.xAxis
             return glyphTop+awayTop*70,4,'white explosion: clear the glyph'
+        end
+        if not glyphLegacy() then
+            -- Wiki rule: stand on the centre art often enough that the Lumenflame never turns white.
+            local glyphW=(state.passive and vector(state.passive.glyph) and state.passive.glyph) or (visual.glyphW and visual.glyphPos) or nil
+            if vector(glyphW) then
+                if distance(pos.X,pos.Z,glyphW)<=(tonumber(cfg.gsV3GlyphRadius) or 9) then state.lastOnGlyph=now end
+                state.lastOnGlyph=state.lastOnGlyph or now
+                local away=now-state.lastOnGlyph
+                local white=glyphWhite()
+                if white>=0.9 then
+                    return glyphW,3,'glyph white: stand on the centre'
+                end
+                if (white>=0.45 or away>(tonumber(cfg.gsV3GlyphMaxAway) or 10)) and glyphRouteSafe(glyphW) then
+                    return glyphW,3,'glyph whitening: back to the centre'
+                end
+            end
         end
         -- An almost empty gauge detonates within seconds, so it outranks a circle
         -- hold that would otherwise keep the player away from the symbol.
