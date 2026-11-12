@@ -1,5 +1,6 @@
 -- Roblox Luau | Dungeon Quest Reborn autofarm | Voidsbane patch r14
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
+-- Vortex UI r1: red/black palette, vortex ring, display font, glow, per-window scaling
 -- Voidsbane: Roblox PathfindingService for dodging + boss approach, plain humanoid walking inside gsV3PathSwitchDist.
 -- Save as workspace/HarvardLabs/autofarm-working.luau so the teleport reload below loads this copy.
 -- Reload this installed copy after dungeon teleports and replay.
@@ -958,7 +959,7 @@ components.coreSettings = function(context)
         slamAwayLean = 35,
         webhook = true,
         webhookUrl = "",
-        webhookUser = "Harvard Labs",
+        webhookUser = "Vortex",
         whStarted = true,
         whLootWait = 3,
         whWins = true,
@@ -1332,7 +1333,7 @@ components.coreSettings = function(context)
     config.mapHealthBars = true
     config.mapNames = true
     config.mapStatsHidden = false
-    config.colorTheme = "Crimson"
+    config.colorTheme = "Vortex"
     config.mapButton = true
     config.whHideName = false
     config.whImages = true
@@ -51826,7 +51827,7 @@ components.movementCombat = function(context)
     }
     context.SPEED_UPTO = { "homeBurst", "travelBurstSpeed", "tweenEscape" }
     context.speedCustomOn = function()
-        return true
+        return capturedContext[1].speedCustom == true
     end
     context.speedNormal = function()
         return 23
@@ -121181,7 +121182,7 @@ components.partyQueue = function(context)
             if context.log then
                 context.log(
                     "AltFarm",
-                    ("found running Harvard Labs on this PC - added to the party: %s"):format(
+                    ("found running Vortex on this PC - added to the party: %s"):format(
                         table.concat(value2, ", ")
                     )
                 )
@@ -128622,40 +128623,40 @@ components.uiLibrary = function(context)
         context.RT, context.CFG, context.LocalPlayer, context.UserInputService
     context.COMPACT = context.COMPACT == true or userInputService.TouchEnabled
     local runService, theme = context.RunService, {}
-    theme.TextPrimary = Color3.fromHex("edf2fa")
-    theme.TextSub = Color3.fromHex("b3bfce")
-    theme.TextMuted = Color3.fromHex("8c9bae")
-    theme.TextOnAccent = Color3.fromHex("000000")
-    theme.StatusBad = Color3.fromHex("D50000")
+    theme.TextPrimary = Color3.fromHex("f4eeee")
+    theme.TextSub = Color3.fromHex("c9b8b9")
+    theme.TextMuted = Color3.fromHex("8f7a7d")
+    theme.TextOnAccent = Color3.fromHex("ffffff")
+    theme.StatusBad = Color3.fromHex("ff8a3d")
     theme.StatusGood = Color3.fromHex("2FBF71")
-    theme.SurfaceHeader = Color3.fromHex("17202b")
-    theme.SurfaceElement = Color3.fromHex("202c3a")
-    theme.SurfaceHover = Color3.fromHex("2b3c4e")
-    theme.SurfaceField = Color3.fromHex("111b27")
-    theme.SurfaceSection = Color3.fromHex("1c2836")
-    theme.SurfaceWell = Color3.fromHex("111923")
-    theme.SurfaceChip = Color3.fromHex("101823")
-    theme.Hairline = Color3.fromHex("344458")
-    theme.BodyTop = Color3.fromHex("1b2633")
-    theme.BodyMid = Color3.fromHex("141e2a")
-    theme.BodyBot = Color3.fromHex("101823")
+    theme.SurfaceHeader = Color3.fromHex("150a0d")
+    theme.SurfaceElement = Color3.fromHex("1f1114")
+    theme.SurfaceHover = Color3.fromHex("2e171c")
+    theme.SurfaceField = Color3.fromHex("0f0709")
+    theme.SurfaceSection = Color3.fromHex("190c10")
+    theme.SurfaceWell = Color3.fromHex("0d0608")
+    theme.SurfaceChip = Color3.fromHex("0c0507")
+    theme.Hairline = Color3.fromHex("3a1a20")
+    theme.BodyTop = Color3.fromHex("160a0e")
+    theme.BodyMid = Color3.fromHex("0f0709")
+    theme.BodyBot = Color3.fromHex("0a0406")
     theme.BodyTopA = 0
     theme.BodyMidA = 0
     theme.BodyBotA = 0
-    theme.SweepSpeed = 0.22
-    theme.AccentA = Color3.fromHex("167b77")
-    theme.AccentMid = Color3.fromHex("3bd4bd")
-    theme.AccentB = Color3.fromHex("55dfc8")
-    theme.AccentDark = Color3.fromHex("124c4a")
-    theme.RadiusSm = 6
-    theme.RadiusMd = 10
-    theme.RadiusLg = 14
+    theme.SweepSpeed = 0.3
+    theme.AccentA = Color3.fromHex("a1101f")
+    theme.AccentMid = Color3.fromHex("e5233a")
+    theme.AccentB = Color3.fromHex("ff4d5e")
+    theme.AccentDark = Color3.fromHex("5e0a14")
+    theme.RadiusSm = 7
+    theme.RadiusMd = 11
+    theme.RadiusLg = 16
     theme.GapSm = 6
     theme.GapMd = 8
     theme.GapLg = 12
     theme.GapXl = 14
-    theme.RowH = context.COMPACT and 48 or 34
-    theme.HeaderH = 40
+    theme.RowH = context.COMPACT and 50 or 36
+    theme.HeaderH = context.COMPACT and 46 or 42
     local fontFamilies, sharedValue =
         {
             sans = "rbxasset://fonts/families/Montserrat.json",
@@ -128666,6 +128667,7 @@ components.uiLibrary = function(context)
     sharedValue[Enum.FontWeight.SemiBold] = Enum.Font.GothamBold
     sharedValue[Enum.FontWeight.Bold] = Enum.Font.GothamBold
     local function setFont(argument, argument2, argument3)
+        if argument2 == "display" and pcall(function() argument.Font = Enum.Font.Michroma end) then return end
         if
             not (
                 pcall(function()
@@ -128678,9 +128680,9 @@ components.uiLibrary = function(context)
     end
     local sharedValue2 = {}
     sharedValue2.windowTitle =
-        { family = "sans", weight = Enum.FontWeight.SemiBold, size = 15, color = "TextPrimary" }
+        { family = "display", weight = Enum.FontWeight.SemiBold, size = 12, color = "TextPrimary" }
     sharedValue2.windowChip =
-        { family = "sans", weight = Enum.FontWeight.Bold, size = 15, color = "TextPrimary" }
+        { family = "display", weight = Enum.FontWeight.Bold, size = 11, color = "TextPrimary" }
     sharedValue2.rowLabel =
         { family = "sans", weight = Enum.FontWeight.Medium, size = context.COMPACT and 14 or 13, color = "TextPrimary" }
     sharedValue2.rowButton =
@@ -128812,7 +128814,63 @@ components.uiLibrary = function(context)
             end)
         return sweep
     end
+    local vortexRings, vortexConn = {}, nil
+    local function vortexRing(parent, size, position)
+        local ring = Instance.new("Frame")
+        ring.Name = "Icon"
+        ring.BackgroundTransparency = 1
+        ring.BorderSizePixel = 0
+        ring.Size = UDim2.fromOffset(size, size)
+        if position then ring.Position = position end
+        ring.LayoutOrder = 1
+        ring.ZIndex = 4
+        ring.Parent = parent
+        corner(ring, size)
+        local ringStroke = Instance.new("UIStroke")
+        ringStroke.Thickness = 2.4
+        ringStroke.Color = Color3.new(1, 1, 1)
+        ringStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        ringStroke.Parent = ring
+        local ringGradient = Instance.new("UIGradient")
+        ringGradient.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, theme.AccentB),
+            ColorSequenceKeypoint.new(0.45, theme.AccentDark),
+            ColorSequenceKeypoint.new(0.55, theme.AccentDark),
+            ColorSequenceKeypoint.new(1, theme.AccentB),
+        })
+        ringGradient.Parent = ringStroke
+        local inner = Instance.new("Frame")
+        inner.Name = "Core"
+        inner.AnchorPoint = Vector2.new(0.5, 0.5)
+        inner.Position = UDim2.fromScale(0.5, 0.5)
+        inner.Size = UDim2.fromScale(0.32, 0.32)
+        inner.BackgroundColor3 = Color3.new(1, 1, 1)
+        inner.BorderSizePixel = 0
+        inner.ZIndex = 4
+        inner.Parent = ring
+        corner(inner, 99)
+        accentGradient(inner, 45)
+        vortexRings[#vortexRings + 1] = ringGradient
+        vortexConn = vortexConn
+            or runService.RenderStepped:Connect(function()
+                local angle = (os.clock() * 150) % 360
+                for index = #vortexRings, 1, -1 do
+                    local gradient = vortexRings[index]
+                    if gradient.Parent then
+                        gradient.Rotation = angle
+                    else
+                        table.remove(vortexRings, index)
+                    end
+                end
+            end)
+        return ring
+    end
     local function stopSweeps()
+        if vortexConn then
+            pcall(function() vortexConn:Disconnect() end)
+            vortexConn = nil
+        end
+        for index = #vortexRings, 1, -1 do vortexRings[index] = nil end
         if sharedValue4 then
             pcall(function()
                 sharedValue4:Disconnect()
@@ -128841,7 +128899,7 @@ components.uiLibrary = function(context)
     end
     local function shadow(argument, argument2, argument3, argument4, argument5, argument6)
         argument2, argument3, argument4, argument5, argument6 =
-            argument2 or 8, argument3 or 1.5, argument4 or 10, argument5 or 0.04, argument6 or theme.RadiusLg
+            argument2 or 9, argument3 or 1.6, argument4 or 12, argument5 or 0.06, argument6 or theme.RadiusLg
         local parent = Instance.new("Frame")
         parent.Name = (argument.Name or "Window") .. "Shadow"
         parent.BackgroundTransparency = 1
@@ -128869,7 +128927,7 @@ components.uiLibrary = function(context)
         for index2 = 1, argument2, 1 do
             value, helper, frame = index2 * argument3, argument4 * (index2 / argument2), Instance.new("Frame")
             frame.Name = "L" .. index2
-            frame.BackgroundColor3 = Color3.new(0, 0, 0)
+            frame.BackgroundColor3 = Color3.fromHex("4a0710")
             frame.BackgroundTransparency = 1 - argument5
             frame.BorderSizePixel = 0
             frame.ZIndex = argument.ZIndex - 1
@@ -128889,7 +128947,7 @@ components.uiLibrary = function(context)
         end
         local tooltip = Instance.new("Frame")
         tooltip.Name = "Tooltip"
-        tooltip.BackgroundColor3 = Color3.fromHex("3a3a42")
+        tooltip.BackgroundColor3 = Color3.fromHex("1c0d11")
         tooltip.BorderSizePixel = 0
         tooltip.Visible = false
         tooltip.ZIndex = 500
@@ -128897,7 +128955,7 @@ components.uiLibrary = function(context)
         tooltip.Size = UDim2.fromOffset(0, 0)
         tooltip.Parent = argument
         corner(tooltip, theme.RadiusSm)
-        stroke(tooltip, Color3.fromHex("4a4a55"), 1)
+        stroke(tooltip, Color3.fromHex("7a1c28"), 1)
         pad(tooltip, 6, 8, 6, 8)
         argument = Instance.new("TextLabel")
         argument.BackgroundTransparency = 1
@@ -128906,7 +128964,7 @@ components.uiLibrary = function(context)
         argument.TextWrapped = true
         argument.TextXAlignment = Enum.TextXAlignment.Left
         argument.TextYAlignment = Enum.TextYAlignment.Top
-        argument.TextColor3 = Color3.fromHex("e8e8ee")
+        argument.TextColor3 = Color3.fromHex("f4eeee")
         argument.TextSize = 11
         argument.ZIndex = 501
         setFont(argument, "sans", Enum.FontWeight.Medium)
@@ -129841,7 +129899,7 @@ components.uiLibrary = function(context)
         list.AutomaticCanvasSize = Enum.AutomaticSize.Y
         list.ScrollingDirection = Enum.ScrollingDirection.Y
         list.ScrollBarThickness = 4
-        list.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 95)
+        list.ScrollBarImageColor3 = Color3.fromRGB(122, 28, 40)
         list.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
         list.Parent = listInput2
         corner(list, theme.RadiusMd)
@@ -130727,7 +130785,29 @@ components.uiLibrary = function(context)
         corner(value, theme.RadiusLg)
         stroke(value, theme.Hairline, 1)
         bodyGradient(value)
-        shadow(value)
+        local winShadow = shadow(value)
+        do
+            local winScale = Instance.new("UIScale")
+            winScale.Parent = value
+            local shadowScale = Instance.new("UIScale")
+            shadowScale.Parent = winShadow
+            local function rescale()
+                local camera = workspace.CurrentCamera
+                local view = camera and camera.ViewportSize or Vector2.new(1280, 720)
+                local scale
+                if context.COMPACT then
+                    scale = math.clamp(math.min(view.X / 720, view.Y / 470), 0.62, 1)
+                else
+                    scale = math.clamp(math.min(view.X / 1100, view.Y / 700), 0.85, 1.12)
+                end
+                winScale.Scale, shadowScale.Scale = scale, scale
+            end
+            rescale()
+            local camera = workspace.CurrentCamera
+            if camera then
+                camera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)
+            end
+        end
         header = Instance.new("Frame")
         header.Name = "Header"
         header.BackgroundColor3 = theme.SurfaceHeader
@@ -130772,15 +130852,7 @@ components.uiLibrary = function(context)
             helper.Name = "Icon"
             helper.LayoutOrder = 1
         else
-            helper = Instance.new("Frame")
-            helper.Name = "Icon"
-            helper.BackgroundColor3 = Color3.new(1, 1, 1)
-            helper.BorderSizePixel = 0
-            helper.Size = UDim2.fromOffset(14, 14)
-            helper.LayoutOrder = 1
-            helper.ZIndex = 4
-            helper.Parent = header
-            corner(helper, 4)
+            helper = vortexRing(header, 20)
         end
         accentGradient(helper, 45)
         helper = label(header, argument.title or "Window", "windowTitle", 2)
@@ -130848,7 +130920,7 @@ components.uiLibrary = function(context)
         value4.CanvasSize = UDim2.new()
         value4.AutomaticCanvasSize = Enum.AutomaticSize.Y
         value4.ScrollBarThickness = 4
-        value4.ScrollBarImageColor3 = Color3.fromHex("50505f")
+        value4.ScrollBarImageColor3 = Color3.fromHex("7a1c28")
         value4.ZIndex = 3
         value4.Parent = value
         pad(value4, 10, theme.GapLg, theme.GapXl, theme.GapLg)
@@ -131012,6 +131084,7 @@ components.uiLibrary = function(context)
         flexFill = flexFill,
         accentGradient = accentGradient,
         accentSweep = accentSweep,
+        vortexRing = vortexRing,
         stopSweeps = stopSweeps,
         bodyGradient = bodyGradient,
         shadow = shadow,
@@ -143724,7 +143797,7 @@ components.statisticsWebhooks = function(context)
     local function name2()
         local value = tostring(config.webhookUser or "")
         if value:match("^%s*$") then
-            return "Harvard Labs"
+            return "Vortex"
         end
         return value
     end
@@ -143773,7 +143846,7 @@ components.statisticsWebhooks = function(context)
         return true
     end
     local text, color, sharedValue7, color2, sharedValue8 =
-        "2026" .. string.char(194, 169) .. " Harvard Labs", 16705372, 3909981, 15548997, {}
+        "2026" .. string.char(194, 169) .. " Vortex", 16705372, 3909981, 15548997, {}
     sharedValue8.common = string.char(226, 154, 170)
     sharedValue8.uncommon = string.char(240, 159, 159, 162)
     sharedValue8.rare = string.char(240, 159, 148, 181)
@@ -143970,7 +144043,7 @@ components.statisticsWebhooks = function(context)
             name = localPlayer and not helper11() and ("%s (@%s)"):format(
                 localPlayer.DisplayName,
                 localPlayer.Name
-            ) or "Harvard Labs",
+            ) or "Vortex",
             icon_url = "https://media.discordapp.net/attachments/1019371259978588321/1547128059545526292/Untitled151_20260906053210.png?ex=6aa44509&is=6aa2f389&hm=c7664b6c0a7136a0d0f8dc498e391bbceb2e0ede6fd3d8ba68ae6a516ce86081&=&format=webp&quality=lossless&width=944&height=944",
         }
     end
@@ -148589,9 +148662,15 @@ components.interfaceMainLoop = function(context)
                     radiusMd
                 )
                 uiLibrary.accentGradient(visible, 45)
+                do
+                    local tileCorner = visible:FindFirstChildOfClass("UICorner")
+                    if tileCorner then tileCorner.CornerRadius = UDim.new(0.5, 0) end
+                    local ring = uiLibrary.vortexRing(value41, 38, UDim2.fromOffset(-1, 0))
+                    ring.ZIndex = 3
+                end
                 helper28(
                     visible,
-                    "h",
+                    "V",
                     22,
                     theme.TextOnAccent,
                     fontWeight.Bold,
@@ -148604,7 +148683,7 @@ components.interfaceMainLoop = function(context)
                 fontWeight.Bold,
                 { Position = value5 and UDim2.fromOffset(48, 5) or UDim2.fromOffset(60, 10) }
             value58.Size, value58.ZIndex = UDim2.fromOffset(value5 and 220 or 320, value5 and 19 or 22), 4
-            helper28(header, "Harvard Labs", value56, value57, bold, value58)
+            helper28(header, "Vortex", value56, value57, bold, value58)
             value23, stroke, value56, value57, value22 =
                 tostring(ver),
                 value5 and 11 or 12,
@@ -150967,7 +151046,7 @@ components.interfaceMainLoop = function(context)
                     end
                 end)
                 if #value == 0 then
-                    return "Added to the list on their own: every account you put in a party under Parties & Runs, and any account that ran Harvard Labs on this PC."
+                    return "Added to the list on their own: every account you put in a party under Parties & Runs, and any account that ran Vortex on this PC."
                 end
                 local value9 = {}
                 for index3 = 1, math.min(#value, 12), 1 do
@@ -150978,7 +151057,7 @@ components.interfaceMainLoop = function(context)
                     #value == 1 and "" or "s",
                     table.concat(value9, ", "),
                     #value > 12 and (" and %d more"):format(#value - 12) or ""
-                return ("%s the %d account%s in your parties or running Harvard Labs on this PC (%s%s)."):format(
+                return ("%s the %d account%s in your parties or running Vortex on this PC (%s%s)."):format(
                     "Added to the list on their own:",
                     value10,
                     value11,
@@ -152408,7 +152487,10 @@ components.interfaceMainLoop = function(context)
                     return argument2:Lerp(argument3, value)
                 end)
             end
-            parent("Crimson", helper6(213, 0, 0), helper6(244, 49, 32))
+            helper45("Vortex", helper6(46, 18, 22), function(argument4)
+                local value = 0.5 + 0.5 * math.sin(argument4 * 1.3)
+                return helper6(229, 35, 58):Lerp(helper6(255, 77, 94), value)
+            end)
             parent("Ember", helper6(232, 97, 0), helper6(255, 138, 42))
             parent("Gold", helper6(230, 176, 0), helper6(255, 213, 74))
             parent("Emerald", helper6(18, 179, 86), helper6(62, 227, 132))
@@ -152427,10 +152509,13 @@ components.interfaceMainLoop = function(context)
                 if value12 == "Chrome" then
                     value12 = "Chroma"
                     value13 = value12
+                elseif value12 == "Crimson" then
+                    value12 = "Vortex"
+                    value13 = value12
                 else
                     value13 = value12
                 end
-                if value13 == nil or value13 == "Crimson" then
+                if value13 == nil or value13 == "Vortex" then
                     pcall(function()
                         if isfile then
                             if isfile("hl_theme.json") then
@@ -153711,9 +153796,9 @@ components.interfaceMainLoop = function(context)
                 if context.WH then
                     context.WH.post({
                         username = context.WH.name and context.WH.name()
-                            or tostring(config.webhookUser or "Harvard Labs"),
+                            or tostring(config.webhookUser or "Vortex"),
                         embeds = {
-                            { title = "Test", description = "Harvard Labs is connected.", color = 3909981 },
+                            { title = "Test", description = "Vortex is connected.", color = 3909981 },
                         },
                     })
                 end
@@ -155349,7 +155434,7 @@ components.interfaceMainLoop = function(context)
                     end)
                     if #value == 0 then
                         helper97(
-                            "No accounts running Harvard Labs on this PC that are not in a party already."
+                            "No accounts running Vortex on this PC that are not in a party already."
                         )
                         return
                     end
@@ -155357,7 +155442,7 @@ components.interfaceMainLoop = function(context)
                     helper97(("Added %d: %s"):format(#value, table.concat(value, ", ")))
                     helper95()
                 end,
-                "Add every account running Harvard Labs on this PC that is not in a party yet - in this server or any other."
+                "Add every account running Vortex on this PC that is not in a party yet - in this server or any other."
             )
             runsThisAccount.add(
                 "Just me",
@@ -156663,7 +156748,7 @@ components.interfaceMainLoop = function(context)
             return textControl7
         end
         runsThisAccount = helper120("TitleChip", 0, 326, 34, theme.RadiusMd)
-        helper121(runsThisAccount, "Harvard Labs", "windowChip", 12, 7, 138, 20)
+        helper121(runsThisAccount, "Vortex", "windowChip", 12, 7, 138, 20)
         value3, value6 =
             ipairs, {
                 helper121(runsThisAccount, "|", "captionKey", 154, 7, 6, 20, theme.TextMuted),
@@ -157652,7 +157737,7 @@ components.interfaceMainLoop = function(context)
                 helper129(entry4, "<discord id>")
             end
             if type(config.webhookUser) == "string" then
-                if config.webhookUser ~= "Harvard Labs" then
+                if config.webhookUser ~= "Vortex" then
                     helper129(config.webhookUser, "<webhook name>")
                 end
             end
@@ -157821,7 +157906,7 @@ components.interfaceMainLoop = function(context)
                 value[#value + 1] = ("%-20s %s"):format(argument, helper137(hide(argument2), 4000))
             end
             value[#value + 1] =
-                "Harvard Labs bug report - send every file of this recording (the whole folder) with your report."
+                "Vortex bug report - send every file of this recording (the whole folder) with your report."
             value[#value + 1] = ""
             helper6(
                 "script",
@@ -158356,7 +158441,7 @@ components.interfaceMainLoop = function(context)
             success, argument = pcall(helper143)
             argument = if success
                 then argument
-                else "Harvard Labs bug report\10header failed: " .. tostring(argument) .. "\10"
+                else "Vortex bug report\10header failed: " .. tostring(argument) .. "\10"
             if not (pcall(writefile, bug.file, argument)) then
                 helper148("Can't record a bug report.", "Could not write " .. bug.file .. ".", 8)
                 return
@@ -158939,7 +159024,7 @@ logline(ok and "R19_INTERCEPT_REGISTERED" or ("R19_INTERCEPT_FAILED "..tostring(
             context.log("ModDetect", "kicking the account: " .. tostring(argument))
             sharedValue39.noteKick(argument)
             pcall(function()
-                localPlayer:Kick("Harvard Labs mod detection: " .. tostring(argument))
+                localPlayer:Kick("Vortex mod detection: " .. tostring(argument))
             end)
         end
         sharedValue39.clear = function()
