@@ -51827,13 +51827,13 @@ components.movementCombat = function(context)
     }
     context.SPEED_UPTO = { "homeBurst", "travelBurstSpeed", "tweenEscape" }
     context.speedCustomOn = function()
-        return capturedContext[1].speedCustom == true
+        return true
     end
     context.speedNormal = function()
-        return 23
+        return tonumber(capturedContext[1].vortexSpeedNormal) or 22
     end
     context.speedBurst = function()
-        return 30
+        return tonumber(capturedContext[1].vortexSpeedBurst) or 29
     end
     context.speedApply = function()
         local value = {}
