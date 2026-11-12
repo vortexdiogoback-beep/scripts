@@ -51830,10 +51830,10 @@ components.movementCombat = function(context)
         return true
     end
     context.speedNormal = function()
-        return tonumber(capturedContext[1].vortexSpeedNormal) or 22
+        return 23
     end
     context.speedBurst = function()
-        return tonumber(capturedContext[1].vortexSpeedBurst) or 29
+        return 30
     end
     context.speedApply = function()
         local value = {}
