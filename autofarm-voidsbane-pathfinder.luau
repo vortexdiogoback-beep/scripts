@@ -1,3 +1,4 @@
+-- VORTEX AUTO FARM r27 | legacy dungeon tables restored; laser-aware dodging
 -- Auto Farm r24 | VORTEX | endgame dungeon selection + stale attack cleanup
 -- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
@@ -53171,8 +53172,6 @@ components.movementCombat = function(context)
         end
         return total/(n+1), maxRisk, vyRisk(b,d/math.max(speed or 20,12))
     end
-    -- r25: choose a safe *route*, not merely a safe endpoint. Meteor evasions
-    -- preferentially run along the open corridor parallel to nearby floor beams.
     local function vyGate(a, destination, speed)
         if not vyActive() then return destination end
         vyRefresh()
@@ -53181,7 +53180,7 @@ components.movementCombat = function(context)
         local _, peak = vyPathRisk(a, destination, speed)
         if peak == 0 then return destination end
         local bossPos
-        for _, enemy in ipairs(capturedContext[3].enemies or {}) do
+        for _, enemy in ipairs(((capturedContext[3] and capturedContext[3].enemies) or {})) do
             if enemy.isBoss and enemy.humanoid and enemy.humanoid.Health > 0 and enemy.x and enemy.z then
                 bossPos = Vector3.new(enemy.x, a.Y, enemy.z)
                 break
@@ -79852,9 +79851,31 @@ components.movementCombat = function(context)
         logT("buff", 4, "Fight", "speed skill pressed")
         return true
     end
-    local supportedDungeonRanks = { ["Northern Lands"] = 14, ["Gilded Skies"] = 15 }
+    local sharedValue9 = {
+        "Desert Temple",
+        "Winter Outpost",
+        "Pirate Island",
+        "King's Castle",
+        "The Underworld",
+        "Samurai Palace",
+        "The Canals",
+        "Ghastly Harbor",
+        "Steampunk Sewers",
+        "Orbital Outpost",
+        "Volcanic Chambers",
+        "Aquatic Temple",
+        "Enchanted Forest",
+        "Northern Lands",
+        "Gilded Skies",
+        "Oni Dungeon",
+    }
     context.dungeonRank = function(argument)
-        return supportedDungeonRanks[argument]
+        for index, entry in ipairs(sharedValue9) do
+            if entry == argument then
+                return index
+            end
+        end
+        return nil
     end
     context.emptySetTick = function(emptyCharAt)
         local value = {}
@@ -120310,17 +120331,30 @@ components.partyQueue = function(context)
         return {
             on = false,
             accounts = {},
-            map = config.autoQueueMap or "Gilded Skies",
+            map = config.autoQueueMap or "Desert Temple",
             difficulty = config.autoQueueDifficulty or "Nightmare",
             waitMax = 120,
             replay = true,
             auto = true,
-            cap = "Gilded Skies",
+            cap = "Steampunk Sewers",
             hardest = "Northern Lands",
-            start = "Gilded Skies",
+            start = "Desert Temple",
         }
     end
     partyQueue.LEVELS = {
+        ["Desert Temple"] = { Easy = 1, Medium = 6, Hard = 12, Insane = 20, Nightmare = 27 },
+        ["Winter Outpost"] = { Easy = 33, Medium = 40, Hard = 45, Insane = 50, Nightmare = 55 },
+        ["Pirate Island"] = { Insane = 60, Nightmare = 65 },
+        ["King's Castle"] = { Insane = 70, Nightmare = 75 },
+        ["The Underworld"] = { Insane = 80, Nightmare = 85 },
+        ["Samurai Palace"] = { Insane = 90, Nightmare = 95 },
+        ["The Canals"] = { Insane = 100, Nightmare = 105 },
+        ["Ghastly Harbor"] = { Insane = 110, Nightmare = 115 },
+        ["Steampunk Sewers"] = { Insane = 120, Nightmare = 125 },
+        ["Orbital Outpost"] = { Insane = 140, Nightmare = 145 },
+        ["Volcanic Chambers"] = { Insane = 150, Nightmare = 155 },
+        ["Aquatic Temple"] = { Insane = 160, Nightmare = 165 },
+        ["Enchanted Forest"] = { Insane = 170, Nightmare = 175 },
         ["Northern Lands"] = { Insane = 180, Nightmare = 185 },
         ["Gilded Skies"] = { Insane = 190, Nightmare = 195 },
     }
@@ -123318,7 +123352,7 @@ components.partyQueue = function(context)
             end
             pcall(partyQueue.soloParty, {
                 auto = false,
-                map = config.autoQueueMap or "Gilded Skies",
+                map = config.autoQueueMap or "Desert Temple",
                 difficulty = config.autoQueueDifficulty or "Nightmare",
                 replay = config.autoQueueReplay ~= false,
             })
@@ -126934,32 +126968,28 @@ components.voidsbaneV3 = function(context)
                 end
             end
             local function beamCrossing(dir)
-                local maxPenalty=0
-                local sideOffset=2.5
+                local penalty=0
                 for _,strip in ipairs(beamStrips) do
                     local side=Vector3.new(-strip.axis.Z,0,strip.axis.X)
                     local rel=root.Position-strip.center
                     local along0=Vector3.new(rel.X,0,rel.Z):Dot(strip.axis)
                     local across0=Vector3.new(rel.X,0,rel.Z):Dot(side)
-                    local alongStep=dir:Dot(strip.axis)
                     local acrossStep=dir:Dot(side)
-                    local near=math.max(0,math.abs(across0)-strip.width-sideOffset)
-                    local t=math.clamp(-across0/(math.abs(acrossStep)>0.001 and acrossStep or 0.001),0,stepB)
-                    local along=along0+alongStep*t
-                    local across=across0+acrossStep*t
-                    if math.abs(along)<strip.half and math.abs(across)<strip.width+sideOffset then
-                        -- Already standing inside a warning: allow escape, never reward staying.
-                        if math.abs(across0)>strip.width+sideOffset or
-                           math.abs(across0+acrossStep*stepB)<math.abs(across0) then
-                            maxPenalty=math.max(maxPenalty,1000)
+                    local alongStep=dir:Dot(strip.axis)
+                    local width=strip.width+2.5
+                    local inside=math.abs(across0)<=width and math.abs(along0)<=strip.half
+                    -- If already within a warning, allow movement out of it.
+                    for sample=1,8 do
+                        local t=stepB*sample/8
+                        local across=across0+acrossStep*t
+                        local along=along0+alongStep*t
+                        if math.abs(across)<=width and math.abs(along)<=strip.half then
+                            if not inside then penalty=math.max(penalty,1000)
+                            elseif math.abs(across)>=math.abs(across0)-0.1 then penalty=math.max(penalty,300) end
                         end
                     end
-                    if near<4 and math.abs(along0)<strip.half and
-                        math.abs(across0+acrossStep*stepB)<math.abs(across0) then
-                        maxPenalty=math.max(maxPenalty,300)
-                    end
                 end
-                return maxPenalty
+                return penalty
             end
             local function breathClear(dir)
                 local p1=root.Position+dir*8
