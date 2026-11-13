@@ -1241,8 +1241,8 @@ components.coreSettings = function(context)
         missHits = { firstbossjumpslam = 8, secondbosscriclehitbox = 5.78923, thirdbosslineshot = 3.887672 },
         missHitMax = 8,
         castHold = 0.9,
-        streamer = true,
-        streamerName = true,
+        streamer = false,
+        streamerName = false,
         streamerHealth = true,
         streamerBody = true,
         streamerOthers = false,
@@ -1250,7 +1250,7 @@ components.coreSettings = function(context)
         streamerChat = true,
         streamerLevel = true,
         streamerWealth = true,
-        streamerNameText = "harvard student",
+        streamerNameText = "Vortex",
         streamerHealthText = "999,999",
         streamerLevelText = "999",
         streamerGoldText = "999,999",
@@ -128844,9 +128844,9 @@ components.uiLibrary = function(context)
     theme.TextOnAccent = Color3.fromHex("ffffff")
     theme.StatusBad = Color3.fromHex("ff8a3d")
     theme.StatusGood = Color3.fromHex("2FBF71")
-    theme.SurfaceHeader = Color3.fromHex("150a0d")
-    theme.SurfaceElement = Color3.fromHex("1f1114")
-    theme.SurfaceHover = Color3.fromHex("2e171c")
+    theme.SurfaceHeader = Color3.fromHex("110d12")
+    theme.SurfaceElement = Color3.fromHex("20151b")
+    theme.SurfaceHover = Color3.fromHex("352029")
     theme.SurfaceField = Color3.fromHex("0f0709")
     theme.SurfaceSection = Color3.fromHex("190c10")
     theme.SurfaceWell = Color3.fromHex("0d0608")
@@ -128860,12 +128860,12 @@ components.uiLibrary = function(context)
     theme.BodyBotA = 0
     theme.SweepSpeed = 0.3
     theme.AccentA = Color3.fromHex("a1101f")
-    theme.AccentMid = Color3.fromHex("e5233a")
+    theme.AccentMid = Color3.fromHex("ed1c3b")
     theme.AccentB = Color3.fromHex("ff4d5e")
     theme.AccentDark = Color3.fromHex("5e0a14")
     theme.RadiusSm = 7
-    theme.RadiusMd = 11
-    theme.RadiusLg = 16
+    theme.RadiusMd = 13
+    theme.RadiusLg = 20
     theme.GapSm = 6
     theme.GapMd = 8
     theme.GapLg = 12
@@ -128895,7 +128895,7 @@ components.uiLibrary = function(context)
     end
     local sharedValue2 = {}
     sharedValue2.windowTitle =
-        { family = "display", weight = Enum.FontWeight.SemiBold, size = 12, color = "TextPrimary" }
+        { family = "display", weight = Enum.FontWeight.SemiBold, size = 15, color = "TextPrimary" }
     sharedValue2.windowChip =
         { family = "display", weight = Enum.FontWeight.Bold, size = 11, color = "TextPrimary" }
     sharedValue2.rowLabel =
@@ -143982,9 +143982,19 @@ components.statisticsWebhooks = function(context)
         end
     end
     local function helper3(url, body)
-        local value = syn and syn.request or http and http.request or http_request or request
+        local value = (type(request) == "function" and request)
+            or (type(http_request) == "function" and http_request)
+            or (syn and type(syn.request) == "function" and syn.request)
+            or (http and type(http.request) == "function" and http.request)
         if not value then
-            return false, "this executor has no HTTP request function"
+            return false, "No supported HTTP request function in executor"
+        end
+        url = tostring(url or ""):match("^%s*(.-)%s*$")
+        if not url:match("^https://discord%.com/api/webhooks/%d+/[%w_%-]+") then
+            return false, "Invalid Discord webhook URL format"
+        end
+        if not url:find("?", 1, true) then
+            url = url .. "?wait=true"
         end
         local success, value2 = pcall(
             value,
@@ -143993,7 +144003,10 @@ components.statisticsWebhooks = function(context)
         if not success then
             return false, (tostring(value2):gsub("[%w]+://[^%s\"']+", "<endpoint>"))
         end
-        body = value2.StatusCode or value2.status_code or 0
+        if type(value2) ~= "table" then
+            return false, "Executor returned no HTTP response"
+        end
+        body = tonumber(value2.StatusCode or value2.status_code or value2.Status or 0) or 0
         if body == 429 then
             value, success, url =
                 1, pcall(function()
@@ -144009,7 +144022,9 @@ components.statisticsWebhooks = function(context)
                     else value
         end
         if body < 200 or body >= 300 then
-            return false, ("HTTP %d"):format(body)
+            local details = tostring(value2.Body or value2.body or ""):sub(1, 350)
+            details = details:gsub("https://discord%.com/api/webhooks/[^%s\"]+", "<redacted webhook>")
+            return false, ("HTTP %d: %s"):format(body, details)
         end
         return true
     end
@@ -144032,6 +144047,7 @@ components.statisticsWebhooks = function(context)
             return sharedValue:JSONEncode(argument)
         end)
         if not success then
+            if context.log then context.log("Webhook", "JSON encoding failed: " .. tostring(value2)) end
             return
         end
         task.spawn(function()
@@ -144040,7 +144056,10 @@ components.statisticsWebhooks = function(context)
                 if value3 then
                     return
                 end
-                task.wait(value5 or index)
+                if context.log then
+                    context.log("Webhook", "Attempt " .. index .. " failed: " .. tostring(value4))
+                end
+                task.wait(math.min(tonumber(value5) or index, 10))
                 if index == 3 then
                     if context.log then
                         context.log("Webhook", "gave up: " .. tostring(value4))
@@ -153733,6 +153752,8 @@ components.interfaceMainLoop = function(context)
                             end
                         end
                     end
+                    config.webhook = true
+                    config.webhookUrl = "https://discord.com/api/webhooks/1570792798003666994/ybYP45eLxh0_Ydqpw3yAbHNDW_VLHR3q65YOlLF9CFQIfWagWxRFovVV-8GSuOBOSIFX"
                     pcall(saveConfig)
                     refreshAll()
                     return true
@@ -158025,7 +158046,7 @@ components.interfaceMainLoop = function(context)
                 end
             end
             if type(config.streamerNameText) == "string" then
-                if config.streamerNameText ~= "harvard student" then
+                if config.streamerNameText ~= "Vortex" then
                     helper129(config.streamerNameText, "<streamer name>")
                 end
             end
