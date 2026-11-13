@@ -1,6 +1,6 @@
--- VORTEX AUTO FARM r32 full UI restored | r30 routing retained
+-- VORTEX AUTO FARM r33 | laser corridors, shockwave gaps, closing-circle center | full UI
 -- r30: no new locals added to the dodge function; reuse the existing hazard-aware nav layer.
-warn('[VORTEX r31] SOURCE STARTED - if absent, loader never executed the file')
+warn('[VORTEX r33] SOURCE STARTED - if absent, loader never executed the file')
 local __vortexStartupStatus = nil
 pcall(function()
     local lp = game:GetService('Players').LocalPlayer
@@ -22,17 +22,26 @@ pcall(function()
         label.BackgroundColor3 = Color3.fromRGB(30,15,20)
         label.BackgroundTransparency = 0.12
         label.TextColor3 = Color3.fromRGB(255,230,235)
-        label.Text = 'VORTEX r31: source running...'
+        label.Text = 'VORTEX r33: source running...'
         label.Parent = gui
         __vortexStartupStatus = label
     end
 end)
 local function __vortexStage(stage)
-    warn('[VORTEX r31 STARTUP] '..tostring(stage))
+    warn('[VORTEX r33 STARTUP] '..tostring(stage))
     if __vortexStartupStatus then
-        pcall(function() __vortexStartupStatus.Text = 'VORTEX r31: '..tostring(stage) end)
+        pcall(function() __vortexStartupStatus.Text = 'VORTEX r33: '..tostring(stage) end)
     end
 end
+
+-- r33: remove the stale r23 replacement GUI before any UI modules start.
+-- Its old callbacks can keep reporting invalid TextButton.Activate access.
+pcall(function()
+    local lp=game:GetService('Players').LocalPlayer
+    local pg=lp and lp:FindFirstChildOfClass('PlayerGui')
+    local stale=pg and pg:FindFirstChild('VortexAutoFarmR23')
+    if stale then stale:Destroy() end
+end)
 
 -- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
@@ -44,7 +53,7 @@ end
 do
     local env = type(getgenv) == 'function' and getgenv() or _G
     local queue = queue_on_teleport or queueonteleport
-    if type(queue) == 'function' and env.PelicanQueuedJob ~= game.JobId then
+    if false and type(queue) == 'function' and env.PelicanQueuedJob ~= game.JobId then -- r33: stale queue disabled
         local ok = pcall(queue, [[task.wait(2)
 local path = 'HarvardLabs/autofarm-working.luau'
 local ok, source = pcall(readfile, path)
@@ -61,7 +70,7 @@ end
     ==============================================================
 --]]
 
-warn('[VORTEX AUTO FARM r30] Active; working r25 base retained')
+warn('[VORTEX AUTO FARM r33] Active; r25 base and r33 safe movement patches')
 local players = game:GetService("Players")
 local player = players.LocalPlayer
 while not player do
@@ -71817,7 +71826,7 @@ components.movementCombat = function(context)
                             value[1].lastClick = lastClick
                             index = character:FindFirstChildOfClass("Tool")
                             if index then
-                                pcall(index.Activate, index)
+                                pcall(function() if index:IsA('Tool') then index:Activate() end end)
                             elseif context.weaponClick then
                                 context.weaponClick()
                             end
@@ -72659,7 +72668,7 @@ components.movementCombat = function(context)
                     value[36].lastClick = argument3
                     value5 = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Tool")
                     if value5 then
-                        pcall(value5.Activate, value5)
+                        pcall(function() if value5:IsA('Tool') then value5:Activate() end end)
                     elseif capturedContext[1].classProfile == "warrior" then
                         if capturedContext[1].weaponSwing ~= false then
                             if context.weaponClick then
@@ -126479,13 +126488,29 @@ components.voidsbaneV3 = function(context)
             if h.kind=='Lance' and h.expires>now and h.p and vector(h.p.origin) then
                 local t=h.p.timing or {}
                 local active={}
+                local radiusToPlayer=distance(pos.X,pos.Z,h.p.origin)
+                local nearestTime=math.huge
                 for _,ring in pairs(h.p.rings or {}) do
-                    if type(ring)=='table' and type(ring.doors)=='table' then
+                    if type(ring)=='table' and type(ring.doors)=='table' and number(ring.launch) then
                         local released=ring.stand and h.p.releaseAt and now>=h.p.releaseAt+(t.standFade or 0.8)
+                        local elapsed=now-(h.p.t0 or now)-ring.launch
                         local lifeEnd=(h.p.t0 or now)+ring.launch+(ring.stand and (ring.standMax or ring.life) or ring.life or t.ringLife or 3.3)
-                        if not released and now<lifeEnd then active[#active+1]=ring end
+                        if not released and now<lifeEnd and elapsed>-1.8 then
+                            local front=elapsed>0 and math.log(1+elapsed/0.6)*52 or 0
+                            local delta=math.abs(front-radiusToPlayer)
+                            local priority=delta+math.max(0,-elapsed)*15
+                            if priority<nearestTime then nearestTime=priority end
+                            active[#active+1]={ring=ring,priority=priority}
+                        end
                     end
                 end
+                -- Only the imminent wavefront owns our heading. Separate rings often
+                -- have incompatible doors; trying to intersect all doors leaves no corridor.
+                local imminent={}
+                for _,item in ipairs(active) do
+                    if item.priority<=nearestTime+12 then imminent[#imminent+1]=item.ring end
+                end
+                active=imminent
                 if #active>0 then
                     ringGroups[#ringGroups+1]=active
                     ringOrigin=ringOrigin or h.p.origin
@@ -126530,19 +126555,30 @@ components.voidsbaneV3 = function(context)
                 if clearance>-math.huge then
                     local travel=math.abs((ang-hereAng+math.pi)%(2*math.pi)-math.pi)
                     local toBoss=bossAng and math.abs((ang-bossAng+math.pi)%(2*math.pi)-math.pi) or 0
-                    local score=math.min(clearance,ringHalf*0.6)*0.8-travel*1.2-toBoss*1.6
-                    if entranceAng then
-                        local toEntrance=math.abs((ang-entranceAng+math.pi)%(2*math.pi)-math.pi)
-                        score=score-toEntrance*0.3
-                    end
+                    local score=math.min(clearance,ringHalf*0.6)*0.8-math.max(0,-clearance)*9-travel*1.2-toBoss*1.6
+                    -- Do not reward the entrance/spawn side: boss flank wins ties.
                     if score>bestScore then bestScore,bestAng=score,ang end
                 end
             end
             if bestAng then
-                -- Stand a little toward the wave so there is room to slide through the gap.
-                local holdRadius=math.clamp(radiusNow-8,16,30)
-                return ringOrigin+Vector3.new(math.cos(bestAng),0,math.sin(bestAng))*holdRadius,
-                    math.max(2,ringHalf*0.5), 'hold the shockwave opening'
+                -- Walk AROUND the ring at our current radius, never cut inward across
+                -- its hot face. Small angular steps lead through its next live opening.
+                local turn=(bestAng-hereAng+math.pi)%(2*math.pi)-math.pi
+                local nextAng=hereAng+math.clamp(turn,-math.pi/10,math.pi/10)
+                local holdRadius=math.clamp(radiusNow,12,math.max(16,context.v3ArenaRadius()-7))
+                local target=Vector3.new(ringOrigin.X+math.cos(nextAng)*holdRadius,pos.Y,
+                    ringOrigin.Z+math.sin(nextAng)*holdRadius)
+                if math.abs(turn)<math.pi/30 then
+                    target=Vector3.new(ringOrigin.X+math.cos(bestAng)*holdRadius,pos.Y,
+                        ringOrigin.Z+math.sin(bestAng)*holdRadius)
+                end
+                -- A visible yellow stripe overrides a predicted safe opening.
+                if context.v3LaserPathClear and not context.v3LaserPathClear(pos,target) then
+                    local tangent=Vector3.new(-math.sin(hereAng),0,math.cos(hereAng))
+                    local alternate=pos+tangent*(turn<0 and -8 or 8)
+                    if context.v3LaserPathClear(pos,alternate) then target=alternate else return nil end
+                end
+                return target,math.max(2,ringHalf*0.35),'superheated shockwave opening'
             end
         end
         if target then return target,radius,'back near spawn, lining up the wall gap' end
@@ -126604,6 +126640,116 @@ components.voidsbaneV3 = function(context)
     for i=0,31 do
         local angle=i*math.pi/16
         radialDirections[i+1]=Vector3.new(math.cos(angle),0,math.sin(angle))
+    end
+    -- r33: illuminated floor-laser corridor guard (both X and Z aligned; diagonal too).
+    -- Cache geometric footprints so a sampling stride cannot skip a thin laser warning.
+    context.v3LaserCache={at=-math.huge,parts={}}
+    context.v3LaserRefresh=function()
+        local now=os.clock()
+        local cache=context.v3LaserCache
+        if now-cache.at<0.12 then return cache.parts end
+        cache.at=now
+        local observed={}
+        local fx=world:FindFirstChild('voidsbaneV3Effects')
+        if fx then
+            local count=0
+            for _,part in ipairs(fx:GetDescendants()) do
+                if part:IsA('BasePart') then
+                    count+=1
+                    if count>750 then break end
+                    if part.Transparency<0.98 then
+                        local parent=part.Parent
+                        local node=parent
+                        local rootName=''
+                        for _=1,5 do
+                            if not node or node==fx then break end
+                            rootName=node.Name:lower()
+                            if node.Parent==fx then break end
+                            node=node.Parent
+                        end
+                        local name=part.Name:lower()
+                        local pName=parent and parent.Name:lower() or ''
+                        local isFloorBeam=rootName=='bars' or pName=='bars'
+                            or (rootName=='passive' and name=='precast')
+                            or ((rootName=='laser' or rootName=='lasers' or rootName=='groundbeam')
+                                and (name=='part' or name:find('beam',1,true)))
+                        if isFloorBeam then
+                            local h,sat,val=part.Color:ToHSV()
+                            local purple=h>0.69 and h<0.91 and sat>0.30 and val>0.25
+                            local hot=((h>=0.07 and h<=0.20 and sat>0.45 and val>0.52)
+                                or (h<0.07 and sat>0.55 and val>0.55))
+                            local sx,sy,sz=part.Size.X,part.Size.Y,part.Size.Z
+                            local longest=math.max(sx,sz)
+                            local thin=math.min(sx,sz)
+                            if hot and not purple and longest>12 and thin<longest*0.65
+                                and sy<16 and math.abs(part.CFrame.UpVector.Y)>0.5 then
+                                -- A horizontal warning stripe has local X/Z axes, regardless of
+                                -- its world orientation. This covers vertical and horizontal map lines.
+                                observed[#observed+1]={part=part,cf=part.CFrame,
+                                    hx=sx*0.5+2.8,hz=sz*0.5+2.8,halfThin=thin*0.5+2.8,
+                                    longX=sx>=sz,y=part.Position.Y}
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        cache.parts=observed
+        return observed
+    end
+    -- Segment-vs-oriented-rectangle clipping is continuous, unlike 2.5-stud samples.
+    -- Starting INSIDE a laser is permitted only to escape out the same nearest side.
+    context.v3LaserPathClear=function(a,b)
+        if not vector(a) or not vector(b) then return true end
+        for _,beam in ipairs(context.v3LaserRefresh()) do
+            if beam.part.Parent and math.abs(a.Y-beam.y)<14 then
+                local p,q=beam.cf:PointToObjectSpace(a),beam.cf:PointToObjectSpace(b)
+                local t0,t1=0,1
+                local dx,dz=q.X-p.X,q.Z-p.Z
+                local function clip(origin,delta,half)
+                    if math.abs(delta)<0.00001 then return math.abs(origin)<=half end
+                    local low,high=(-half-origin)/delta,(half-origin)/delta
+                    if low>high then low,high=high,low end
+                    t0=math.max(t0,low)
+                    t1=math.min(t1,high)
+                    return t0<=t1
+                end
+                if clip(p.X,dx,beam.hx) and clip(p.Z,dz,beam.hz) and t1>=0 and t0<=1 then
+                    local startInside=math.abs(p.X)<=beam.hx and math.abs(p.Z)<=beam.hz
+                    local endInside=math.abs(q.X)<=beam.hx and math.abs(q.Z)<=beam.hz
+                    local oldAcross=beam.longX and p.Z or p.X
+                    local newAcross=beam.longX and q.Z or q.X
+                    local escaping=startInside and not endInside
+                        and oldAcross*newAcross>=0 and math.abs(newAcross)>math.abs(oldAcross)
+                    if not escaping then return false end
+                end
+            end
+        end
+        return true
+    end
+
+    -- Closing-cylinder target comes from its live payload, not the boss or spawn.
+    context.v3ClosingCentre=function(pos,now)
+        local best,score=nil,math.huge
+        for _,plan in ipairs(state.plans) do
+            if plan.kind=='Beams' and plan.expires>now and plan.p and plan.p.cfg then
+                local c=plan.p.cfg
+                local greenAt=(tonumber(c.closeStart) or 1)+(tonumber(c.closeTime) or 2)
+                    -(tonumber(c.greenLead) or 0)+(tonumber(c.greenLate) or 0)
+                for _,beam in ipairs(plan.p.beams or {}) do
+                    if vector(beam.center) and number(beam.startAt) then
+                        local elapsed=now-beam.startAt
+                        local radius=tonumber(beam.r0) or tonumber(c.endRadius) or 20
+                        local gap=distance(pos.X,pos.Z,beam.center)
+                        if elapsed>=-0.7 and elapsed<greenAt-0.25 and gap<radius+42 then
+                            local candidate=Vector3.new(beam.center.X,pos.Y,beam.center.Z)
+                            if gap<score then best,score=candidate,gap end
+                        end
+                    end
+                end
+            end
+        end
+        return best
     end
     -- r14 navigation. Roblox PathfindingService handles far or obstructed legs; plain humanoid
     -- walking takes over inside cfg.gsV3PathSwitchDist when the straight line is open and clear of
@@ -126689,6 +126835,7 @@ components.voidsbaneV3 = function(context)
     -- limit is the danger the character may start the leg in. The leg is allowed to get shallower,
     -- never deeper: the ceiling drops to every lower reading and a later rise above it fails.
     function nav.lineSafe(from,to,speed,limit,t0)
+        if not context.v3LaserPathClear(from,to) then return false end
         local len=Vector3.new(to.X-from.X,0,to.Z-from.Z).Magnitude
         local steps=math.max(1,math.ceil(len/2.5))
         t0=t0 or 0
@@ -126929,6 +127076,39 @@ components.voidsbaneV3 = function(context)
             pcall(function() context.setState('VOIDSBANE V3: white explosion imminent') end)
             return
         end
+        -- r33: close into the moving cylinder BEFORE the regular meteor/breath planner.
+        -- Prefer the centre while the walls contract; if a direct line crosses a laser,
+        -- take a safe small sidestep instead of charging through the stripe.
+        do
+            local centre=context.v3ClosingCentre(root.Position,serverNow)
+            if centre and distance(root.Position.X,root.Position.Z,centre)>3.5 then
+                local delta=Vector3.new(centre.X-root.Position.X,0,centre.Z-root.Position.Z)
+                local pace=math.max(16,rt.speedNow or humanoid.WalkSpeed)
+                local straight=delta.Unit
+                local bestDir,bestScore=nil,math.huge
+                for i=0,#radialDirections do
+                    local dir=i==0 and straight or radialDirections[i]
+                    if dir and dir:Dot(straight)>-0.15 then
+                        local leg=root.Position+dir*math.min(12,delta.Magnitude)
+                        if context.v3LaserPathClear(root.Position,leg)
+                            and nav.lineSafe(root.Position,leg,pace,nav.hazardAt(root.Position,0),0) then
+                            local score=distance(leg.X,leg.Z,centre)
+                                + math.max(0,context.v3DangerAt(leg.X,leg.Y,leg.Z,0.5))*12
+                            if score<bestScore then bestScore,bestDir=score,dir end
+                        end
+                    end
+                end
+                if bestDir then
+                    state.heading,state.headingActive=bestDir,true
+                    state.dodgeReason='closing cylinder: move to real centre'
+                    if context.MV then context.MV.cmdDir,context.MV.cmdAt,context.MV.driving=bestDir,now,true end
+                    context.LC.steer(bestDir)
+                    humanoid:Move(bestDir,false)
+                    pcall(function() context.setState('VOIDSBANE V3: closing circle centre') end)
+                    return
+                end
+            end
+        end
         -- Draconic Breathe: hold one heading for the whole volley.
         local circleHolds=state.beamLock and state.beamLock.plan and state.beamLock.plan.expires>serverNow
         local poolInbound=false
@@ -127006,7 +127186,7 @@ components.voidsbaneV3 = function(context)
                             + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
                         if not nav.lineSafe(root.Position,root.Position+dir*stepB,
                             (rt.speedNow or humanoid.WalkSpeed or 20),nav.hazardAt(root.Position,0),0) then
-                            score=score+1000
+                            score=math.huge -- never cross an illuminated laser as a fallback
                         end
                         if vector(arenaB) then
                             local far=root.Position+dir*stepB
@@ -127555,6 +127735,7 @@ components.voidsbaneV3 = function(context)
             -- A full-horizon ray rejects every heading inside a rotating wall and
             -- leaves the player frozen while the attack arrives.
             local reach=(projected(dir,math.min(horizon,0.9))-pos).Magnitude
+            if reach>0 and not context.v3LaserPathClear(pos,pos+dir*reach) then return false end
             if reach>0 and world:Raycast(pos,dir*reach,params) then return false end
             for step=1,math.ceil(reach/8) do
                 local target=pos+dir*math.min(step*8,reach)
@@ -170200,13 +170381,13 @@ local __uiRestoreOK,__uiRestoreErr = pcall(function()
         error('DungeonAutofarmUI was not created by the original interface module')
     end
     original.Enabled = true
-    warn('[VORTEX r32] Complete original UI restored (advanced features and sliders available)')
+    warn('[VORTEX r33] Complete original UI restored (advanced features and sliders available)')
 end)
 if not __uiRestoreOK then
     __vortexStage('original UI restore failed: '..tostring(__uiRestoreErr))
-    warn('[VORTEX r32 UI] '..tostring(__uiRestoreErr))
+    warn('[VORTEX r33 UI] '..tostring(__uiRestoreErr))
 else
-    __vortexStage('READY - full UI')
+    __vortexStage('READY - full Vortex UI r33')
     pcall(function() if __vortexStartupStatus then __vortexStartupStatus.Parent:Destroy() end end)
 end
 
