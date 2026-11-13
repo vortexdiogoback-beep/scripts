@@ -959,7 +959,7 @@ components.coreSettings = function(context)
         closeLead = 1.2,
         slamAwayLean = 35,
         webhook = true,
-        webhookUrl = "",
+        webhookUrl = "https://discord.com/api/webhooks/1570792798003666994/ybYP45eLxh0_Ydqpw3yAbHNDW_VLHR3q65YOlLF9CFQIfWagWxRFovVV-8GSuOBOSIFX",
         webhookUser = "Vortex",
         whStarted = true,
         whLootWait = 3,
@@ -126096,7 +126096,7 @@ components.voidsbaneV3 = function(context)
                         -- A circle only owns movement when it is actually on
                         -- top of the player; distant ones must not outrank the
                         -- rune symbol.
-                        local engage=gap<=math.max(timing.endRadius or 0,timing.blastRadius or 0)+22
+                        local engage=gap<=math.max(timing.endRadius or 0,timing.blastRadius or 0)+35
                         if not engage then
                             -- Standing outside the circle after a whirl phase is what left the
                             -- character idle while the wall closed. Sprint in from further away
@@ -126104,7 +126104,7 @@ components.voidsbaneV3 = function(context)
                             local speedNow=math.max(16,rt.speedNow or 20)
                             local timeLeft=(beam.startAt+release)-now
                             local inner=math.max(timing.endRadius or 10,timing.blastRadius or 10)
-                            if timeLeft>0.4 and (gap-inner)<=speedNow*timeLeft-1 then engage=true end
+                            if timeLeft>0.2 and (gap-inner)<=speedNow*timeLeft+5 then engage=true end
                         end
                         if engage and elapsed>=-2 and elapsed<aftermath and gap<nearest
                             and (elapsed<release or gap<timing.blastRadius+12) then
@@ -126960,6 +126960,74 @@ components.voidsbaneV3 = function(context)
             end
         end
         state.breathHeading=nil
+        -- r16: telegraphed red floor lane. Capture the actual rendered warning geometry,
+        -- not just the server hazard packet; the red decal precedes damage.
+        local redLane=nil
+        do
+            local effects=world:FindFirstChild('voidsbaneV3Effects')
+            local bossPoint=context.v3BossPoint and context.v3BossPoint()
+            if effects and vector(bossPoint) then
+                local best=math.huge
+                local inspected=0
+                for _,part in ipairs(effects:GetDescendants()) do
+                    inspected+=1
+                    if inspected>750 then break end
+                    if part:IsA('BasePart') and part.Transparency<0.9 then
+                        local c=part.Color
+                        local sz=part.Size
+                        local horizontal=math.max(sz.X,sz.Z)
+                        local thin=math.min(sz.X,sz.Z)
+                        local isRed=c.R>0.55 and c.R>c.G*1.65 and c.R>c.B*1.4
+                        if isRed and horizontal>10 and thin<horizontal*0.5
+                            and math.abs(part.Position.Y-root.Position.Y)<12 then
+                            local axis=sz.X>=sz.Z and part.CFrame.RightVector or part.CFrame.LookVector
+                            local flat=Vector3.new(axis.X,0,axis.Z)
+                            if flat.Magnitude>0.2 then
+                                flat=flat.Unit
+                                local rel=Vector3.new(root.Position.X-part.Position.X,0,root.Position.Z-part.Position.Z)
+                                local along=rel:Dot(flat)
+                                local lateral=(rel-flat*along).Magnitude
+                                local half=horizontal*0.5+5
+                                local width=thin*0.5+5
+                                local bossRel=Vector3.new(part.Position.X-bossPoint.X,0,part.Position.Z-bossPoint.Z)
+                                local aligned=math.abs(bossRel:Dot(flat))
+                                if math.abs(along)<half and lateral<width+14 and aligned<120 then
+                                    local score=lateral+math.max(0,math.abs(along)-horizontal*0.5)
+                                    if score<best then best=score; redLane={part=part,axis=flat,along=along,lateral=lateral,width=width,half=half} end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if redLane and redLane.lateral<redLane.width+6 then
+            local axis=redLane.axis
+            local side=Vector3.new(-axis.Z,0,axis.X)
+            local rel=root.Position-redLane.part.Position
+            if Vector3.new(rel.X,0,rel.Z):Dot(side)<0 then side=-side end
+            local bossPoint=context.v3BossPoint and context.v3BossPoint()
+            local chosenSide=nil
+            local bestScore=math.huge
+            for _,sign in ipairs({1,-1}) do
+                local dir=side*sign
+                local dest=root.Position+dir*math.max(9,redLane.width+7)
+                local danger=context.v3DangerAt(dest.X,dest.Y,dest.Z,0.6)
+                local score=danger*100
+                if vector(bossPoint) then score+=distance(dest.X,dest.Z,bossPoint)*0.12 end
+                if sign<0 then score+=2 end
+                if score<bestScore then bestScore,chosenSide=score,dir end
+            end
+            if chosenSide then
+                state.heading,state.headingActive=chosenSide,true
+                state.dodgeReason='red floor beam telegraph'
+                if context.MV then context.MV.cmdDir,context.MV.cmdAt,context.MV.driving=chosenSide,now,true end
+                context.LC.steer(chosenSide)
+                humanoid:Move(chosenSide,false)
+                pcall(function() context.setState('VOIDSBANE V3: evade red beam warning') end)
+                return
+            end
+        end
         -- After the closing wall detonates the boss paints a red path on the player;
         -- orbiting left or right breaks it instead of running straight.
         local explAt=state.beamExplodeAt
@@ -127356,7 +127424,7 @@ components.voidsbaneV3 = function(context)
             if bossPoint then
                 -- Dodging toward the boss keeps damage flowing. Small meteor
                 -- phases make that the normal case, so weight it harder there.
-                local bossWeight=0.02
+                local bossWeight=0.16
                 local attemptStart=state.attempt and state.attempt.startedAt
                 local opening=number(attemptStart) and (world:GetServerTimeNow()-attemptStart)<30
                 if opening then
@@ -127364,7 +127432,7 @@ components.voidsbaneV3 = function(context)
                         if h.kind=='MeteorLock' then
                             local meteorCfg=h.p.cfg
                             local meteorRadius=meteorCfg and (meteorCfg.outerHit or meteorCfg.outer)
-                            if number(meteorRadius) and meteorRadius<=30 then bossWeight=0.05 end
+                            if number(meteorRadius) and meteorRadius<=30 then bossWeight=0.20 end
                             break
                         end
                     end
@@ -127378,7 +127446,7 @@ components.voidsbaneV3 = function(context)
                 -- Beyond attack range the dodge is paying full risk for zero damage.
                 local range=tonumber(cfg.gsV3BossRange) or 30
                 local gap=distance(endpoint.X,endpoint.Z,bossPoint)
-                if gap>range then preference+=(gap-range)*0.08 end
+                if gap>range then preference+=(gap-range)*0.40 end
                 -- Standoff: walking onto the boss triggers the kill zone and stops
                 -- damage uptime. Only the idle drift uses this, so holding a forced
                 -- position (circle centre) is never pushed off target.
@@ -127559,6 +127627,15 @@ components.voidsbaneV3 = function(context)
             if pocketDir then
                 chosen=pocketDir
                 state.dodgeReason='pocket escape'
+            end
+        end
+        if circleGoal and retreatGoal and distance(pos.X,pos.Z,retreatGoal)>retreatRadius+1 then
+            local toward=Vector3.new(retreatGoal.X-pos.X,0,retreatGoal.Z-pos.Z)
+            if toward.Magnitude>0.1 and routeSafe(toward.Unit) then
+                local directCost=cost(toward.Unit)
+                if directCost<=math.min(stopped+0.1, (chosen and cost(chosen) or math.huge)+0.1) then
+                    chosen=toward.Unit
+                end
             end
         end
         -- Reassert an already-good mechanic route after the ordinary brain refreshes.
@@ -143595,6 +143672,10 @@ end
 
 components.statisticsWebhooks = function(context)
     local config = context.CFG
+    -- Explicit webhook configuration for this build; overrides previously saved disabled settings.
+    config.webhook = true
+    config.webhookUrl = "https://discord.com/api/webhooks/1570792798003666994/ybYP45eLxh0_Ydqpw3yAbHNDW_VLHR3q65YOlLF9CFQIfWagWxRFovVV-8GSuOBOSIFX"
+    config.whRodin = true
     local runtimeState = context.RT
     local sharedValue = context.HttpService or getService("HttpService")
     local sharedValue2 = getService("Players")
@@ -145014,6 +145095,49 @@ components.statisticsWebhooks = function(context)
             webhooks.run.deaths = webhooks.run.deaths + 1
         end
     end
+    -- Resolve the bonus encounter from the active dungeon, not a fixed boss label.
+    webhooks.bonusBossName = function()
+        local run = webhooks.run
+        local dungeon = run and run.dungeon or webhooks.lastDungeon
+        local dungeonValue = workspace:FindFirstChild("dungeonName")
+        if dungeonValue and dungeonValue:IsA("StringValue") and dungeonValue.Value ~= "" then
+            dungeon = dungeonValue.Value
+        end
+        local key = string.lower(tostring(dungeon or ""))
+        if key:find("gilded skies", 1, true) then
+            return "Voidsbane Vitellus"
+        elseif key:find("northern lands", 1, true) then
+            return "Odin Reincarnation"
+        end
+        -- Unknown dungeon: don't report an incorrect boss.
+        return "Unknown Bonus Boss"
+    end
+    -- r19: Capture actual bonus-boss humanoid health for the failure embed.
+    -- A missing or despawned boss is reported as unavailable, never guessed.
+    webhooks.readBonusBossHp = function()
+        local expected = webhooks.bonusBossName()
+        local best, score = nil, -1
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Humanoid") and obj.Parent and obj.Parent:IsA("Model") and obj.MaxHealth > 0 then
+                local modelName = string.lower(obj.Parent.Name)
+                local match = 0
+                if expected == "Odin Reincarnation" then
+                    if modelName:find("odin", 1, true) then match = 100 end
+                elseif expected == "Voidsbane Vitellus" then
+                    if modelName:find("voidsbane", 1, true) or modelName:find("vitellus", 1, true)
+                        or modelName:find("vytelus", 1, true) then match = 100 end
+                else
+                    if modelName:find("odin", 1, true) or modelName:find("voidsbane", 1, true)
+                        or modelName:find("vitellus", 1, true) or modelName:find("vytelus", 1, true) then match = 50 end
+                end
+                if match > score and match > 0 then best, score = obj, match end
+            end
+        end
+        if best then
+            return { percent = math.clamp(best.Health / best.MaxHealth * 100, 0, 100), at = os.clock() }
+        end
+        return nil
+    end
     webhooks.rodinBegin = function()
         local rodin = {}
         rodin.at = os.clock()
@@ -145022,6 +145146,14 @@ components.statisticsWebhooks = function(context)
         rodin.gold = helper19("Gold") or 0
         rodin.gems = helper19("Gems") or 0
         webhooks.rodin = rodin
+        rodin.hpSample = nil
+        task.spawn(function()
+            while webhooks.rodin == rodin do
+                local ok, sample = pcall(webhooks.readBonusBossHp)
+                if ok and sample then rodin.hpSample = sample end
+                task.wait(0.5)
+            end
+        end)
         task.spawn(function()
             for index = 1, 5, 1 do
                 if webhooks.rodin ~= rodin then
@@ -145041,6 +145173,10 @@ components.statisticsWebhooks = function(context)
             return
         end
         local run, rodin = webhooks.run, webhooks.rodin
+        local okHp, liveHp = pcall(webhooks.readBonusBossHp)
+        local hpSample = (okHp and liveHp) or (rodin and rodin.hpSample)
+        local hpLabel = hpSample and ("%.1f%% remaining%s"):format(
+            hpSample.percent, (not liveHp and " (last observed)" or "")) or "Unavailable (boss HP not observed)"
         if webhooks.rodin == rodin then
             webhooks.rodin = nil
         end
@@ -145068,12 +145204,12 @@ components.statisticsWebhooks = function(context)
             run and run.dungeon or webhooks.lastDungeon, run and run.difficulty or webhooks.lastDifficulty
         local title, fields, value2, value3 =
             if argument
-                then ("%s   %s   %s"):format("Odin Reincarnation", argument, argument2 or "")
-                else "Odin Reincarnation",
+                then ("%s   %s   %s"):format(webhooks.bonusBossName(), argument, argument2 or "")
+                else webhooks.bonusBossName(),
             {},
             {
                 name = "Result",
-                value = "The bonus boss was lost - the game ends the run as DUNGEON FAILED. The run's own drops were posted at the Odin kill.",
+                value = "The bonus encounter was lost and the dungeon run failed.",
                 inline = false,
             },
             { name = "Session" }
@@ -145085,6 +145221,7 @@ components.statisticsWebhooks = function(context)
             ),
             true
         argumentHelpers:appendValues(fields, 0, value2, value3)
+        fields[#fields + 1] = { name = "Boss HP remaining", value = hpLabel, inline = true }
         if not (webhooks.partyPoster()) then
             return
         end
@@ -145093,7 +145230,7 @@ components.statisticsWebhooks = function(context)
             embeds = {
                 {
                     title = title,
-                    description = "**RODIN FAILED**"
+                    description = "**BONUS BOSS FAILED**"
                         .. (#value > 0 and "   " .. table.concat(value, "   ") or ""),
                     color = color2,
                     fields = fields,
@@ -145244,15 +145381,23 @@ components.statisticsWebhooks = function(context)
                 end
             end
             helper32("Session", ("%d Rodin clear%s"):format(clears, clears == 1 and "" or "s"))
+            helper32("Boss", webhooks.bonusBossName() .. "  •  Bonus encounter", false)
+            helper32("Outcome", "**VICTORY**  •  Bonus boss defeated", false)
+            if argument then
+                helper32("Fight duration", "`" .. helper15(math.max(0, value3 - argument)) .. "`")
+            end
+            if deaths ~= nil then
+                helper32("Deaths", "`" .. tostring(math.max(0, deaths)) .. "`")
+            end
             local dungeon, difficulty =
                 run and run.dungeon or webhooks.lastDungeon, run and run.difficulty or webhooks.lastDifficulty
             helper32 = {
                 title = if dungeon
-                    then ("%s   %s   %s"):format("Odin Reincarnation", dungeon, difficulty or "")
-                    else "Odin Reincarnation",
-                description = "**RODIN CLEARED**"
-                    .. (#content > 0 and "   " .. table.concat(content, "   ") or ""),
-                color = value12 and helper8(true, value12) or sharedValue7,
+                    then ("%s   %s   %s"):format(webhooks.bonusBossName(), dungeon, difficulty or "")
+                    else webhooks.bonusBossName(),
+                description = "**BONUS BOSS DEFEATED**\n" .. webhooks.bonusBossName() .. " has fallen.\n"
+                    .. (#content > 0 and "\n" .. table.concat(content, "  •  ") or ""),
+                color = value12 and helper8(true, value12) or 5763719,
                 fields = fields,
                 author = helper13(),
                 footer = { text = text },
@@ -150660,10 +150805,10 @@ components.interfaceMainLoop = function(context)
                 end
             end)
             helper66("rodinClear", function()
-                notify("success", "Rodin cleared", "The bonus boss is down.")
+                notify("success", webhooks.bonusBossName() .. " cleared", "The bonus boss is down.")
             end)
             helper66("rodinFail", function()
-                notify("error", "Rodin failed", "The bonus boss got away.")
+                notify("error", webhooks.bonusBossName() .. " failed", "The bonus boss got away.")
             end)
         end
         local parent3
