@@ -1,4 +1,4 @@
--- VORTEX AUTO FARM r30 | known-working r25 startup with safe 32-way breath dodging
+-- VORTEX AUTO FARM r30 startup-diagnostic patch | breath / beam routing retained
 -- r30: no new locals added to the dodge function; reuse the existing hazard-aware nav layer.
 warn('[VORTEX r30] Direct Luau source execution reached')
 -- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
@@ -169971,6 +169971,8 @@ logline(ok and "R19_INTERCEPT_REGISTERED" or ("R19_INTERCEPT_FAILED "..tostring(
 end
 local context = {}
 components.coreSettings(context)
+-- Optional spear setup must never stop the farm from launching.
+local spearOK, spearErr = pcall(function()
 -- User-authorized ranged loadout: equip God Spear before lobby auto-queue starts.
 if game.PlaceId == 77649408247578 then
     local remotes = context.ReplicatedStorage:FindFirstChild('remotes')
@@ -169984,7 +169986,8 @@ if game.PlaceId == 77649408247578 then
                     local id=tonumber(tostring(key):match('(%d+)$'))
                     if id then
                         local success,result=pcall(equip.InvokeServer,equip,'ability',id,'q')
-                        getgenv().PelicanSpearPreflight={success=success,result=result,id=id}
+                        local runtimeEnv = (type(getgenv)=='function' and getgenv()) or _G
+                        runtimeEnv.PelicanSpearPreflight={success=success,result=result,id=id}
                         if success and result~=false then break end
                     end
                 end
@@ -169992,6 +169995,8 @@ if game.PlaceId == 77649408247578 then
         end
     end
 end
+end)
+if not spearOK then warn('[VORTEX startup] Optional God Spear preflight skipped: '..tostring(spearErr)) end
 context.loadConfig()
 context.CFG.hitboxesMinimapOnly=true
 context.CFG.visuals=false
@@ -170002,36 +170007,106 @@ context.CFG.minimapSmoothHz=15
 context.CFG.minimapRange=180
 context.CFG.gsWideCamera=true
 context.CFG.gsCameraDistance=125
-components.attackCatalog(context)
-components.gearProfiles(context)
-components.movementBoost(context)
-components.hazardReader(context)
-components.dangerGeometry(context)
-components.odinMechanics(context)
-components.bossPhases(context)
-components.bubbleBoss(context)
-components.voidsbaneV3(context)
-components.movementCombat(context)
-components.inventoryAutomation(context)
-components.partyQueue(context)
-components.raidAutomation(context)
+do
+    local ok,err=pcall(components.attackCatalog,context)
+    if not ok then error('[VORTEX STARTUP: attackCatalog] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.gearProfiles,context)
+    if not ok then error('[VORTEX STARTUP: gearProfiles] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.movementBoost,context)
+    if not ok then error('[VORTEX STARTUP: movementBoost] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.hazardReader,context)
+    if not ok then error('[VORTEX STARTUP: hazardReader] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.dangerGeometry,context)
+    if not ok then error('[VORTEX STARTUP: dangerGeometry] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.odinMechanics,context)
+    if not ok then error('[VORTEX STARTUP: odinMechanics] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.bossPhases,context)
+    if not ok then error('[VORTEX STARTUP: bossPhases] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.bubbleBoss,context)
+    if not ok then error('[VORTEX STARTUP: bubbleBoss] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.voidsbaneV3,context)
+    if not ok then error('[VORTEX STARTUP: voidsbaneV3] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.movementCombat,context)
+    if not ok then error('[VORTEX STARTUP: movementCombat] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.inventoryAutomation,context)
+    if not ok then error('[VORTEX STARTUP: inventoryAutomation] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.partyQueue,context)
+    if not ok then error('[VORTEX STARTUP: partyQueue] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.raidAutomation,context)
+    if not ok then error('[VORTEX STARTUP: raidAutomation] '..tostring(err),0) end
+end
 context.CFG.bonusVoteDelay = 1.5
-components.gsBonusSupport(context)
-components.menuLayout(context)
-components.nestedHazards(context)
-components.uiLibrary(context)
-components.drawing(context)
-components.walls(context)
-components.statisticsWebhooks(context)
-components.interfaceMainLoop(context)
-context.DungeonRecorder = components.dungeonRecorderButton(context)
-components.clientDiagnostics(context)
+do
+    local ok,err=pcall(components.gsBonusSupport,context)
+    if not ok then error('[VORTEX STARTUP: gsBonusSupport] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.menuLayout,context)
+    if not ok then error('[VORTEX STARTUP: menuLayout] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.nestedHazards,context)
+    if not ok then error('[VORTEX STARTUP: nestedHazards] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.uiLibrary,context)
+    if not ok then error('[VORTEX STARTUP: uiLibrary] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.drawing,context)
+    if not ok then error('[VORTEX STARTUP: drawing] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.walls,context)
+    if not ok then error('[VORTEX STARTUP: walls] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.statisticsWebhooks,context)
+    if not ok then error('[VORTEX STARTUP: statisticsWebhooks] '..tostring(err),0) end
+end
+do
+    local ok,err=pcall(components.interfaceMainLoop,context)
+    if not ok then error('[VORTEX STARTUP: interfaceMainLoop] '..tostring(err),0) end
+end
+do
+    local ok,result=pcall(components.dungeonRecorderButton,context)
+    if ok then context.DungeonRecorder=result else warn('[VORTEX optional recorder] '..tostring(result)) end
+end
+do
+    local ok,err=pcall(components.clientDiagnostics,context)
+    if not ok then error('[VORTEX STARTUP: clientDiagnostics] '..tostring(err),0) end
+end
 -- Apply after UI defaults/profile restoration as well.
 context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
 if context.MM and context.MM.setView then context.MM.setView('2d') end
 -- VORTEX r23: replacement responsive interface; legacy UI disabled, gameplay retained.
+local uiOK,uiErr=pcall(function()
 do
     local Players = game:GetService('Players')
     local UIS = game:GetService('UserInputService')
@@ -170155,5 +170230,8 @@ do
     tabs['Auto Farm'].page.Visible=true;tabs['Auto Farm'].tab.BackgroundColor3=C.accent;tabs['Auto Farm'].tab.TextColor3=C.white
     print('[VORTEX r23] New responsive GUI loaded; old interface disabled')
 end
+
+end)
+if not uiOK then warn('[VORTEX UI] New menu failed (core automation retained): '..tostring(uiErr)) end
 
 return context
