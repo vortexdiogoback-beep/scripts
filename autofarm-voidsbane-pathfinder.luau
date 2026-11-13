@@ -1,20 +1,17 @@
--- VORTEX AUTO FARM r29 | r25 startup + continuous laser-aware breath dodging
+-- VORTEX AUTO FARM r30 | known-working r25 startup with safe 32-way breath dodging
+-- r30: no new locals added to the dodge function; reuse the existing hazard-aware nav layer.
+warn('[VORTEX r30] Direct Luau source execution reached')
 -- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
 -- Vortex UI r1: red/black palette, vortex ring, display font, glow, per-window scaling
 -- Voidsbane: Roblox PathfindingService for dodging + boss approach, plain humanoid walking inside gsV3PathSwitchDist.
 -- r15 nav: time-aware, monotone-escape pathing (see nav.* and the grid router in v3DodgeApply).
--- Teleport reloads are enabled only if HarvardLabs/autofarm-working.luau contains this r29 build.
+-- IMPORTANT: install this r21 file at HarvardLabs/autofarm-working.luau for teleport persistence.
 -- Reload this installed copy after dungeon teleports and replay.
 do
     local env = type(getgenv) == 'function' and getgenv() or _G
     local queue = queue_on_teleport or queueonteleport
-    local sourceOk, installed = pcall(function()
-        return type(readfile) == 'function' and readfile('HarvardLabs/autofarm-working.luau')
-    end)
-    if type(queue) == 'function' and env.PelicanQueuedJob ~= game.JobId
-        and sourceOk and type(installed) == 'string'
-        and installed:find('-- VORTEX AUTO FARM r29', 1, true) then
+    if type(queue) == 'function' and env.PelicanQueuedJob ~= game.JobId then
         local ok = pcall(queue, [[task.wait(2)
 local path = 'HarvardLabs/autofarm-working.luau'
 local ok, source = pcall(readfile, path)
@@ -31,7 +28,7 @@ end
     ==============================================================
 --]]
 
-warn("[VORTEX AUTO FARM r29] Started from the last working r25 base; beam-aware dodge active.")
+warn('[VORTEX AUTO FARM r30] Active; working r25 base retained')
 local players = game:GetService("Players")
 local player = players.LocalPlayer
 while not player do
@@ -125344,7 +125341,7 @@ components.voidsbaneV3 = function(context)
                         local cf=part.CFrame
                         local rv,uv,lv=cf.RightVector,cf.UpVector,cf.LookVector
                         local hy=math.abs(rv.Y)*s.X/2+math.abs(uv.Y)*s.Y/2+math.abs(lv.Y)*s.Z/2
-                        local shape={cname=cname,gap=GAP_CONTAINERS[cname]==true,hot=hs=='hot',cx=pos.X,cz=pos.Z,y=pos.Y,hy=hy,vx=vx,vz=vz,extra=extra}
+                        local shape={cname=cname,gap=GAP_CONTAINERS[cname]==true,cx=pos.X,cz=pos.Z,y=pos.Y,hy=hy,vx=vx,vz=vz,extra=extra}
                         local ball=part:IsA('Part') and part.Shape~=Enum.PartType.Block
                         if ball then
                             shape.k='circle'
@@ -126670,54 +126667,6 @@ components.voidsbaneV3 = function(context)
         end
         return true
     end
-    -- r29: continuous segment-vs-oriented-rectangle test for active warning strips.
-    -- Unlike point sampling, this cannot jump across a thin vertical/horizontal beam.
-    -- Uses refreshVisual's existing cached parts; no extra descendants scan in the dodge loop.
-    function nav.breathBeamPenalty(from, to)
-        refreshVisual()
-        local dx, dz = to.X-from.X, to.Z-from.Z
-        local pad = (tonumber(cfg.gsV3AgentRadius) or 2) + 2
-        local penalty = 0
-        for _, sh in ipairs(visual.shapes) do
-            if sh.k == 'obb' and sh.hot and
-                (sh.cname == 'bars' or sh.cname == 'beams' or sh.cname == 'passive')
-                and math.abs(from.Y-sh.y) < sh.hy+8 then
-                -- Move the beam slightly forward for network/effect movement.
-                local rx = from.X - (sh.cx + sh.vx*0.15)
-                local rz = from.Z - (sh.cz + sh.vz*0.15)
-                local u = rx*sh.ax + rz*sh.az
-                local v = rx*sh.bx + rz*sh.bz
-                local du = dx*sh.ax + dz*sh.az
-                local dv = dx*sh.bx + dz*sh.bz
-                local hu, hv = sh.hx+pad, sh.hz+pad
-                local enter, leave, possible = 0, 1, true
-                if math.abs(du) < 0.00001 then
-                    if math.abs(u) > hu then possible = false end
-                else
-                    local t1, t2 = (-hu-u)/du, (hu-u)/du
-                    enter = math.max(enter, math.min(t1,t2))
-                    leave = math.min(leave, math.max(t1,t2))
-                end
-                if possible and math.abs(dv) < 0.00001 then
-                    if math.abs(v) > hv then possible = false end
-                elseif possible then
-                    local t1, t2 = (-hv-v)/dv, (hv-v)/dv
-                    enter = math.max(enter, math.min(t1,t2))
-                    leave = math.min(leave, math.max(t1,t2))
-                end
-                if possible and enter <= leave then
-                    local startInside = math.abs(u) <= hu and math.abs(v) <= hv
-                    local endInside = math.abs(u+du) <= hu and math.abs(v+dv) <= hv
-                    if startInside and not endInside and leave <= 0.30 then
-                        -- Allow a short escape from an existing beam rather than trapping the player.
-                    else
-                        penalty += 1000
-                    end
-                end
-            end
-        end
-        return penalty
-    end
     function nav.walkClear(pos,goal,speed,limit)
         local rp,ignore=nav.rayParams()
         if nav.blocked(pos,goal,rp,ignore) then return false end
@@ -126963,9 +126912,10 @@ components.voidsbaneV3 = function(context)
                 local p2=root.Position+dir*16
                 if context.v3DangerAt(p1.X,p1.Y,p1.Z,0.35)>=3 then return false end
                 if context.v3DangerAt(p2.X,p2.Y,p2.Z,0.8)>=3 then return false end
-                -- A continuous crossing test catches both X and Z-oriented thin strips.
-                -- Check the actual travel segment, not just its safe-looking endpoint.
-                if nav.breathBeamPenalty(root.Position,root.Position+dir*stepB)>0 then return false end
+                -- r30: sweep the ENTIRE route against active beams/meteors, not just the endpoints.
+                -- nav.lineSafe already checks the predicted time-window and allows escape from danger.
+                if not nav.lineSafe(root.Position,root.Position+dir*stepB,
+                    (rt.speedNow or humanoid.WalkSpeed or 20),nav.hazardAt(root.Position,0),0) then return false end
                 -- A straight line held for a whole volley crossed the arena edge; keep the
                 -- committed heading inside the fighting area.
                 if vector(arenaB) then
@@ -126992,44 +126942,44 @@ components.voidsbaneV3 = function(context)
                 end
             end
             local hold=state.breathHeading
-            local bossB=context.v3BossPoint and context.v3BossPoint()
-            local bossNow=vector(bossB) and distance(root.Position.X,root.Position.Z,bossB) or nil
-            -- Drop a previously locked retreat heading once it starts leaving the boss arena.
-            if hold and bossNow then
-                local later=distance(root.Position.X+hold.X*stepB,root.Position.Z+hold.Z*stepB,bossB)
-                if later>math.max(32,bossNow+8) then hold=nil end
-            end
             if not hold or hold.Magnitude<0.1 or not breathClear(hold) then
                 local bestDir,bestScore=nil,math.huge
-                -- All 32 headings already include horizontal, vertical and diagonals.
-                -- Don't preselect 'away from the boss': use the safe lane that maintains damage range.
-                for i=1,#radialDirections do
-                    local dir=radialDirections[i]
-                    if breathClear(dir) then
-                        local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
-                            + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
-                        if bossNow then
-                            local after=distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
-                            score += (after-bossNow)*0.10 + math.max(0,12-after)*0.35
+                local bossB=context.v3BossPoint and context.v3BossPoint()
+                -- r30: never prioritize retreat from the boss. Search all 32 directions.
+                if not bestDir then
+                    for i=1,#radialDirections do
+                        local dir=radialDirections[i]
+                        if breathClear(dir) then
+                            local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
+                                + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
+                            -- Prefer a safe line that stays near the boss, including its rear flank.
+                            if vector(bossB) then
+                                score=score+0.10*(distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
+                                    -distance(root.Position.X,root.Position.Z,bossB))
+                            end
+                            if score<bestScore then bestScore,bestDir=score,dir end
                         end
-                        if score<bestScore then bestScore,bestDir=score,dir end
                     end
                 end
                 if not bestDir then
-                    -- Every path has a hazard: minimize risk first, then keep boss proximity.
+                    -- Nothing is clean: still commit to the least dangerous heading so
+                    -- the volley cannot land point blank while the bot re-plans.
                     local fallbackScore=math.huge
                     for i=1,#radialDirections do
                         local dir=radialDirections[i]
                         local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
                             + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
-                            + nav.breathBeamPenalty(root.Position,root.Position+dir*stepB)
+                        if not nav.lineSafe(root.Position,root.Position+dir*stepB,
+                            (rt.speedNow or humanoid.WalkSpeed or 20),nav.hazardAt(root.Position,0),0) then
+                            score=score+1000
+                        end
                         if vector(arenaB) then
                             local far=root.Position+dir*stepB
                             if distance(far.X,far.Z,arenaB)>maxRB then score=score+1000 end
                         end
-                        if bossNow then
-                            local after=distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
-                            score += math.max(0,after-bossNow)*0.10
+                        if vector(bossB) then
+                            score=score+0.08*math.max(0,distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
+                                -distance(root.Position.X,root.Position.Z,bossB))
                         end
                         if score<fallbackScore then fallbackScore,bestDir=score,dir end
                     end
@@ -131158,7 +131108,7 @@ components.uiLibrary = function(context)
             helper = vortexRing(header, 20)
         end
         accentGradient(helper, 45)
-        helper = label(header, "VORTEX r29  /  " .. tostring(argument.title or "Window"), "windowTitle", 2)
+        helper = label(header, "VORTEX r30  /  " .. tostring(argument.title or "Window"), "windowTitle", 2)
         helper.ZIndex = 4
         flexFill(helper, 58 + (argument.info and 32 or 0))
         local value5 = false
