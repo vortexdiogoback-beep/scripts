@@ -1,21 +1,37 @@
--- VORTEX AUTO FARM r28 | diagnostic startup, reload disabled, r27 movement retained
--- Auto Farm r24 | VORTEX | endgame dungeon selection + stale attack cleanup
+-- VORTEX AUTO FARM r29 | r25 startup + continuous laser-aware breath dodging
 -- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
 -- Vortex UI r1: red/black palette, vortex ring, display font, glow, per-window scaling
 -- Voidsbane: Roblox PathfindingService for dodging + boss approach, plain humanoid walking inside gsV3PathSwitchDist.
 -- r15 nav: time-aware, monotone-escape pathing (see nav.* and the grid router in v3DodgeApply).
--- IMPORTANT: install this r21 file at HarvardLabs/autofarm-working.luau for teleport persistence.
--- r28: teleport auto-reload disabled to prevent an old installed copy replacing this version.
--- Re-enable only after confirming the executor and installed script support it.
-warn('[VORTEX r28] Starting source; teleport auto-reload disabled')
+-- Teleport reloads are enabled only if HarvardLabs/autofarm-working.luau contains this r29 build.
+-- Reload this installed copy after dungeon teleports and replay.
+do
+    local env = type(getgenv) == 'function' and getgenv() or _G
+    local queue = queue_on_teleport or queueonteleport
+    local sourceOk, installed = pcall(function()
+        return type(readfile) == 'function' and readfile('HarvardLabs/autofarm-working.luau')
+    end)
+    if type(queue) == 'function' and env.PelicanQueuedJob ~= game.JobId
+        and sourceOk and type(installed) == 'string'
+        and installed:find('-- VORTEX AUTO FARM r29', 1, true) then
+        local ok = pcall(queue, [[task.wait(2)
+local path = 'HarvardLabs/autofarm-working.luau'
+local ok, source = pcall(readfile, path)
+if ok then
+    local fn, err = loadstring(source, 'DungeonAutofarm.working')
+    if fn then fn() else warn('[DQ reload] '..tostring(err)) end
+else warn('[DQ reload] '..tostring(source)) end]])
+        if ok then env.PelicanQueuedJob = game.JobId end
+    end
+end
 --[[
     ==============================================================
     DEOBFUSCATED BY @notninjaa3530 (Discord)
     ==============================================================
 --]]
 
-warn("[VORTEX AUTO FARM r28] Main script reached")
+warn("[VORTEX AUTO FARM r29] Started from the last working r25 base; beam-aware dodge active.")
 local players = game:GetService("Players")
 local player = players.LocalPlayer
 while not player do
@@ -53160,6 +53176,8 @@ components.movementCombat = function(context)
         end
         return total/(n+1), maxRisk, vyRisk(b,d/math.max(speed or 20,12))
     end
+    -- r25: choose a safe *route*, not merely a safe endpoint. Meteor evasions
+    -- preferentially run along the open corridor parallel to nearby floor beams.
     local function vyGate(a, destination, speed)
         if not vyActive() then return destination end
         vyRefresh()
@@ -53168,7 +53186,7 @@ components.movementCombat = function(context)
         local _, peak = vyPathRisk(a, destination, speed)
         if peak == 0 then return destination end
         local bossPos
-        for _, enemy in ipairs(((capturedContext[3] and capturedContext[3].enemies) or {})) do
+        for _, enemy in ipairs(capturedContext[3].enemies or {}) do
             if enemy.isBoss and enemy.humanoid and enemy.humanoid.Health > 0 and enemy.x and enemy.z then
                 bossPos = Vector3.new(enemy.x, a.Y, enemy.z)
                 break
@@ -79839,31 +79857,9 @@ components.movementCombat = function(context)
         logT("buff", 4, "Fight", "speed skill pressed")
         return true
     end
-    local sharedValue9 = {
-        "Desert Temple",
-        "Winter Outpost",
-        "Pirate Island",
-        "King's Castle",
-        "The Underworld",
-        "Samurai Palace",
-        "The Canals",
-        "Ghastly Harbor",
-        "Steampunk Sewers",
-        "Orbital Outpost",
-        "Volcanic Chambers",
-        "Aquatic Temple",
-        "Enchanted Forest",
-        "Northern Lands",
-        "Gilded Skies",
-        "Oni Dungeon",
-    }
+    local supportedDungeonRanks = { ["Northern Lands"] = 14, ["Gilded Skies"] = 15 }
     context.dungeonRank = function(argument)
-        for index, entry in ipairs(sharedValue9) do
-            if entry == argument then
-                return index
-            end
-        end
-        return nil
+        return supportedDungeonRanks[argument]
     end
     context.emptySetTick = function(emptyCharAt)
         local value = {}
@@ -120319,30 +120315,17 @@ components.partyQueue = function(context)
         return {
             on = false,
             accounts = {},
-            map = config.autoQueueMap or "Desert Temple",
+            map = config.autoQueueMap or "Gilded Skies",
             difficulty = config.autoQueueDifficulty or "Nightmare",
             waitMax = 120,
             replay = true,
             auto = true,
-            cap = "Steampunk Sewers",
+            cap = "Gilded Skies",
             hardest = "Northern Lands",
-            start = "Desert Temple",
+            start = "Gilded Skies",
         }
     end
     partyQueue.LEVELS = {
-        ["Desert Temple"] = { Easy = 1, Medium = 6, Hard = 12, Insane = 20, Nightmare = 27 },
-        ["Winter Outpost"] = { Easy = 33, Medium = 40, Hard = 45, Insane = 50, Nightmare = 55 },
-        ["Pirate Island"] = { Insane = 60, Nightmare = 65 },
-        ["King's Castle"] = { Insane = 70, Nightmare = 75 },
-        ["The Underworld"] = { Insane = 80, Nightmare = 85 },
-        ["Samurai Palace"] = { Insane = 90, Nightmare = 95 },
-        ["The Canals"] = { Insane = 100, Nightmare = 105 },
-        ["Ghastly Harbor"] = { Insane = 110, Nightmare = 115 },
-        ["Steampunk Sewers"] = { Insane = 120, Nightmare = 125 },
-        ["Orbital Outpost"] = { Insane = 140, Nightmare = 145 },
-        ["Volcanic Chambers"] = { Insane = 150, Nightmare = 155 },
-        ["Aquatic Temple"] = { Insane = 160, Nightmare = 165 },
-        ["Enchanted Forest"] = { Insane = 170, Nightmare = 175 },
         ["Northern Lands"] = { Insane = 180, Nightmare = 185 },
         ["Gilded Skies"] = { Insane = 190, Nightmare = 195 },
     }
@@ -123340,7 +123323,7 @@ components.partyQueue = function(context)
             end
             pcall(partyQueue.soloParty, {
                 auto = false,
-                map = config.autoQueueMap or "Desert Temple",
+                map = config.autoQueueMap or "Gilded Skies",
                 difficulty = config.autoQueueDifficulty or "Nightmare",
                 replay = config.autoQueueReplay ~= false,
             })
@@ -125361,7 +125344,7 @@ components.voidsbaneV3 = function(context)
                         local cf=part.CFrame
                         local rv,uv,lv=cf.RightVector,cf.UpVector,cf.LookVector
                         local hy=math.abs(rv.Y)*s.X/2+math.abs(uv.Y)*s.Y/2+math.abs(lv.Y)*s.Z/2
-                        local shape={cname=cname,gap=GAP_CONTAINERS[cname]==true,cx=pos.X,cz=pos.Z,y=pos.Y,hy=hy,vx=vx,vz=vz,extra=extra}
+                        local shape={cname=cname,gap=GAP_CONTAINERS[cname]==true,hot=hs=='hot',cx=pos.X,cz=pos.Z,y=pos.Y,hy=hy,vx=vx,vz=vz,extra=extra}
                         local ball=part:IsA('Part') and part.Shape~=Enum.PartType.Block
                         if ball then
                             shape.k='circle'
@@ -126687,6 +126670,54 @@ components.voidsbaneV3 = function(context)
         end
         return true
     end
+    -- r29: continuous segment-vs-oriented-rectangle test for active warning strips.
+    -- Unlike point sampling, this cannot jump across a thin vertical/horizontal beam.
+    -- Uses refreshVisual's existing cached parts; no extra descendants scan in the dodge loop.
+    function nav.breathBeamPenalty(from, to)
+        refreshVisual()
+        local dx, dz = to.X-from.X, to.Z-from.Z
+        local pad = (tonumber(cfg.gsV3AgentRadius) or 2) + 2
+        local penalty = 0
+        for _, sh in ipairs(visual.shapes) do
+            if sh.k == 'obb' and sh.hot and
+                (sh.cname == 'bars' or sh.cname == 'beams' or sh.cname == 'passive')
+                and math.abs(from.Y-sh.y) < sh.hy+8 then
+                -- Move the beam slightly forward for network/effect movement.
+                local rx = from.X - (sh.cx + sh.vx*0.15)
+                local rz = from.Z - (sh.cz + sh.vz*0.15)
+                local u = rx*sh.ax + rz*sh.az
+                local v = rx*sh.bx + rz*sh.bz
+                local du = dx*sh.ax + dz*sh.az
+                local dv = dx*sh.bx + dz*sh.bz
+                local hu, hv = sh.hx+pad, sh.hz+pad
+                local enter, leave, possible = 0, 1, true
+                if math.abs(du) < 0.00001 then
+                    if math.abs(u) > hu then possible = false end
+                else
+                    local t1, t2 = (-hu-u)/du, (hu-u)/du
+                    enter = math.max(enter, math.min(t1,t2))
+                    leave = math.min(leave, math.max(t1,t2))
+                end
+                if possible and math.abs(dv) < 0.00001 then
+                    if math.abs(v) > hv then possible = false end
+                elseif possible then
+                    local t1, t2 = (-hv-v)/dv, (hv-v)/dv
+                    enter = math.max(enter, math.min(t1,t2))
+                    leave = math.min(leave, math.max(t1,t2))
+                end
+                if possible and enter <= leave then
+                    local startInside = math.abs(u) <= hu and math.abs(v) <= hv
+                    local endInside = math.abs(u+du) <= hu and math.abs(v+dv) <= hv
+                    if startInside and not endInside and leave <= 0.30 then
+                        -- Allow a short escape from an existing beam rather than trapping the player.
+                    else
+                        penalty += 1000
+                    end
+                end
+            end
+        end
+        return penalty
+    end
     function nav.walkClear(pos,goal,speed,limit)
         local rp,ignore=nav.rayParams()
         if nav.blocked(pos,goal,rp,ignore) then return false end
@@ -126927,64 +126958,14 @@ components.voidsbaneV3 = function(context)
             local arenaB=state.passive and state.passive.glyph
             local maxRB=context.v3ArenaRadius()
             local stepB=math.max(16,(rt.speedNow or humanoid.WalkSpeed or 20)*1.6)
-            -- r26: evaluate both X/Z axes. Warning strips can be horizontal,
-            -- vertical or rotated; a destination alone is not enough.
-            local beamStrips={}
-            do
-                local effects=world:FindFirstChild('voidsbaneV3Effects')
-                if effects then
-                    local count=0
-                    for _,part in ipairs(effects:GetDescendants()) do
-                        count+=1
-                        if count>750 then break end
-                        if part:IsA('BasePart') and part.Transparency<0.9 then
-                            local c,sz=part.Color,part.Size
-                            local long,short=math.max(sz.X,sz.Z),math.min(sz.X,sz.Z)
-                            if c.R>0.55 and c.R>c.G*1.65 and c.R>c.B*1.4
-                                and long>10 and short<long*0.5
-                                and math.abs(part.Position.Y-root.Position.Y)<12 then
-                                local a=sz.X>=sz.Z and part.CFrame.RightVector or part.CFrame.LookVector
-                                local axis=Vector3.new(a.X,0,a.Z)
-                                if axis.Magnitude>0.2 then
-                                    axis=axis.Unit
-                                    beamStrips[#beamStrips+1]={center=part.Position,axis=axis,
-                                        half=long*0.5+3,width=short*0.5+3}
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            local function beamCrossing(dir)
-                local penalty=0
-                for _,strip in ipairs(beamStrips) do
-                    local side=Vector3.new(-strip.axis.Z,0,strip.axis.X)
-                    local rel=root.Position-strip.center
-                    local along0=Vector3.new(rel.X,0,rel.Z):Dot(strip.axis)
-                    local across0=Vector3.new(rel.X,0,rel.Z):Dot(side)
-                    local acrossStep=dir:Dot(side)
-                    local alongStep=dir:Dot(strip.axis)
-                    local width=strip.width+2.5
-                    local inside=math.abs(across0)<=width and math.abs(along0)<=strip.half
-                    -- If already within a warning, allow movement out of it.
-                    for sample=1,8 do
-                        local t=stepB*sample/8
-                        local across=across0+acrossStep*t
-                        local along=along0+alongStep*t
-                        if math.abs(across)<=width and math.abs(along)<=strip.half then
-                            if not inside then penalty=math.max(penalty,1000)
-                            elseif math.abs(across)>=math.abs(across0)-0.1 then penalty=math.max(penalty,300) end
-                        end
-                    end
-                end
-                return penalty
-            end
             local function breathClear(dir)
                 local p1=root.Position+dir*8
                 local p2=root.Position+dir*16
                 if context.v3DangerAt(p1.X,p1.Y,p1.Z,0.35)>=3 then return false end
                 if context.v3DangerAt(p2.X,p2.Y,p2.Z,0.8)>=3 then return false end
-                if beamCrossing(dir)>0 then return false end
+                -- A continuous crossing test catches both X and Z-oriented thin strips.
+                -- Check the actual travel segment, not just its safe-looking endpoint.
+                if nav.breathBeamPenalty(root.Position,root.Position+dir*stepB)>0 then return false end
                 -- A straight line held for a whole volley crossed the arena edge; keep the
                 -- committed heading inside the fighting area.
                 if vector(arenaB) then
@@ -127011,37 +126992,44 @@ components.voidsbaneV3 = function(context)
                 end
             end
             local hold=state.breathHeading
+            local bossB=context.v3BossPoint and context.v3BossPoint()
+            local bossNow=vector(bossB) and distance(root.Position.X,root.Position.Z,bossB) or nil
+            -- Drop a previously locked retreat heading once it starts leaving the boss arena.
+            if hold and bossNow then
+                local later=distance(root.Position.X+hold.X*stepB,root.Position.Z+hold.Z*stepB,bossB)
+                if later>math.max(32,bossNow+8) then hold=nil end
+            end
             if not hold or hold.Magnitude<0.1 or not breathClear(hold) then
                 local bestDir,bestScore=nil,math.huge
-                local bossB=context.v3BossPoint and context.v3BossPoint()
-                -- Prefer parallel-to-strip motion that maintains or closes boss distance.
-                if not bestDir then
-                    for i=1,#radialDirections do
-                        local dir=radialDirections[i]
-                        if breathClear(dir) then
-                            local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
-                                + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
-                            if vector(bossB) then
-                                local current=distance(root.Position.X,root.Position.Z,bossB)
-                                local future=distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
-                                score=score+(future-current)*0.08
-                            end
-                            if score<bestScore then bestScore,bestDir=score,dir end
+                -- All 32 headings already include horizontal, vertical and diagonals.
+                -- Don't preselect 'away from the boss': use the safe lane that maintains damage range.
+                for i=1,#radialDirections do
+                    local dir=radialDirections[i]
+                    if breathClear(dir) then
+                        local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
+                            + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
+                        if bossNow then
+                            local after=distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
+                            score += (after-bossNow)*0.10 + math.max(0,12-after)*0.35
                         end
+                        if score<bestScore then bestScore,bestDir=score,dir end
                     end
                 end
                 if not bestDir then
-                    -- Nothing is clean: still commit to the least dangerous heading so
-                    -- the volley cannot land point blank while the bot re-plans.
+                    -- Every path has a hazard: minimize risk first, then keep boss proximity.
                     local fallbackScore=math.huge
                     for i=1,#radialDirections do
                         local dir=radialDirections[i]
                         local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
                             + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
-                        score=score+beamCrossing(dir)
+                            + nav.breathBeamPenalty(root.Position,root.Position+dir*stepB)
                         if vector(arenaB) then
                             local far=root.Position+dir*stepB
                             if distance(far.X,far.Z,arenaB)>maxRB then score=score+1000 end
+                        end
+                        if bossNow then
+                            local after=distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
+                            score += math.max(0,after-bossNow)*0.10
                         end
                         if score<fallbackScore then fallbackScore,bestDir=score,dir end
                     end
@@ -131170,7 +131158,7 @@ components.uiLibrary = function(context)
             helper = vortexRing(header, 20)
         end
         accentGradient(helper, 45)
-        helper = label(header, "VORTEX r21  /  " .. tostring(argument.title or "Window"), "windowTitle", 2)
+        helper = label(header, "VORTEX r29  /  " .. tostring(argument.title or "Window"), "windowTitle", 2)
         helper.ZIndex = 4
         flexFill(helper, 58 + (argument.info and 32 or 0))
         local value5 = false
@@ -170031,50 +170019,8 @@ logline(ok and "R19_INTERCEPT_REGISTERED" or ("R19_INTERCEPT_FAILED "..tostring(
         end
     end)
 end
--- r28 diagnostics: visible startup state and first uncaught component failure.
-local __r28Stage = 'source entered'
-local function __r28Report(message, failed)
-    warn('[VORTEX r28 DIAG] ' .. tostring(message))
-    pcall(function()
-        local plr = game:GetService('Players').LocalPlayer
-        local pg = plr and plr:FindFirstChildOfClass('PlayerGui')
-        if not pg then return end
-        local gui = pg:FindFirstChild('VortexR28StartupDiagnostics')
-        if not gui then
-            gui = Instance.new('ScreenGui')
-            gui.Name = 'VortexR28StartupDiagnostics'
-            gui.ResetOnSpawn = false
-            gui.DisplayOrder = 999
-            gui.Parent = pg
-            local label = Instance.new('TextLabel')
-            label.Name = 'Status'
-            label.Size = UDim2.new(1, -24, 0, 88)
-            label.Position = UDim2.fromOffset(12, 16)
-            label.BackgroundColor3 = Color3.fromRGB(22, 12, 20)
-            label.TextColor3 = Color3.fromRGB(255, 235, 235)
-            label.TextWrapped = true
-            label.TextSize = 15
-            label.Font = Enum.Font.Code
-            label.Parent = gui
-        end
-        gui.Status.Text = 'VORTEX r28 DIAGNOSTICS\n' .. tostring(message)
-        if failed then gui.Status.TextColor3 = Color3.fromRGB(255, 80, 80) end
-    end)
-end
-local function __r28Init(name, callback)
-    __r28Stage = name
-    __r28Report('Starting: ' .. name, false)
-    local ok, err = xpcall(callback, function(e)
-        local trace = debug and debug.traceback and debug.traceback(tostring(e), 2) or tostring(e)
-        __r28Report('FAILED in ' .. name .. ': ' .. trace, true)
-        return trace
-    end)
-    if not ok then error('[VORTEX r28] ' .. name .. ': ' .. tostring(err), 0) end
-    __r28Report('Completed: ' .. name, false)
-end
 local context = {}
-__r28Init('coreSettings', function() components.coreSettings(context) end)
-__r28Report('Starting lobby equipment preflight', false)
+components.coreSettings(context)
 -- User-authorized ranged loadout: equip God Spear before lobby auto-queue starts.
 if game.PlaceId == 77649408247578 then
     local remotes = context.ReplicatedStorage:FindFirstChild('remotes')
@@ -170088,7 +170034,7 @@ if game.PlaceId == 77649408247578 then
                     local id=tonumber(tostring(key):match('(%d+)$'))
                     if id then
                         local success,result=pcall(equip.InvokeServer,equip,'ability',id,'q')
-                        if type(getgenv)=='function' then getgenv().PelicanSpearPreflight={success=success,result=result,id=id} end
+                        getgenv().PelicanSpearPreflight={success=success,result=result,id=id}
                         if success and result~=false then break end
                     end
                 end
@@ -170096,8 +170042,7 @@ if game.PlaceId == 77649408247578 then
         end
     end
 end
-__r28Report('Loading saved configuration', false)
-__r28Init('loadConfig', function() context.loadConfig() end)
+context.loadConfig()
 context.CFG.hitboxesMinimapOnly=true
 context.CFG.visuals=false
 context.CFG.minimap=true
@@ -170107,36 +170052,35 @@ context.CFG.minimapSmoothHz=15
 context.CFG.minimapRange=180
 context.CFG.gsWideCamera=true
 context.CFG.gsCameraDistance=125
-__r28Init('attackCatalog', function() components.attackCatalog(context) end)
-__r28Init('gearProfiles', function() components.gearProfiles(context) end)
-__r28Init('movementBoost', function() components.movementBoost(context) end)
-__r28Init('hazardReader', function() components.hazardReader(context) end)
-__r28Init('dangerGeometry', function() components.dangerGeometry(context) end)
-__r28Init('odinMechanics', function() components.odinMechanics(context) end)
-__r28Init('bossPhases', function() components.bossPhases(context) end)
-__r28Init('bubbleBoss', function() components.bubbleBoss(context) end)
-__r28Init('voidsbaneV3', function() components.voidsbaneV3(context) end)
-__r28Init('movementCombat', function() components.movementCombat(context) end)
-__r28Init('inventoryAutomation', function() components.inventoryAutomation(context) end)
-__r28Init('partyQueue', function() components.partyQueue(context) end)
-__r28Init('raidAutomation', function() components.raidAutomation(context) end)
+components.attackCatalog(context)
+components.gearProfiles(context)
+components.movementBoost(context)
+components.hazardReader(context)
+components.dangerGeometry(context)
+components.odinMechanics(context)
+components.bossPhases(context)
+components.bubbleBoss(context)
+components.voidsbaneV3(context)
+components.movementCombat(context)
+components.inventoryAutomation(context)
+components.partyQueue(context)
+components.raidAutomation(context)
 context.CFG.bonusVoteDelay = 1.5
-__r28Init('gsBonusSupport', function() components.gsBonusSupport(context) end)
-__r28Init('menuLayout', function() components.menuLayout(context) end)
-__r28Init('nestedHazards', function() components.nestedHazards(context) end)
-__r28Init('uiLibrary', function() components.uiLibrary(context) end)
-__r28Init('drawing', function() components.drawing(context) end)
-__r28Init('walls', function() components.walls(context) end)
-__r28Init('statisticsWebhooks', function() components.statisticsWebhooks(context) end)
-__r28Init('interfaceMainLoop', function() components.interfaceMainLoop(context) end)
-__r28Init('dungeonRecorderButton', function() context.DungeonRecorder = components.dungeonRecorderButton(context) end)
-__r28Init('clientDiagnostics', function() components.clientDiagnostics(context) end)
+components.gsBonusSupport(context)
+components.menuLayout(context)
+components.nestedHazards(context)
+components.uiLibrary(context)
+components.drawing(context)
+components.walls(context)
+components.statisticsWebhooks(context)
+components.interfaceMainLoop(context)
+context.DungeonRecorder = components.dungeonRecorderButton(context)
+components.clientDiagnostics(context)
 -- Apply after UI defaults/profile restoration as well.
 context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
 if context.MM and context.MM.setView then context.MM.setView('2d') end
-__r28Report('Main components completed; creating replacement GUI', false)
 -- VORTEX r23: replacement responsive interface; legacy UI disabled, gameplay retained.
 do
     local Players = game:GetService('Players')
@@ -170259,9 +170203,7 @@ do
     UIS.InputEnded:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
     tabs['Auto Farm'].tab:Activate()
     tabs['Auto Farm'].page.Visible=true;tabs['Auto Farm'].tab.BackgroundColor3=C.accent;tabs['Auto Farm'].tab.TextColor3=C.white
-    print('[VORTEX r28] Responsive GUI loaded')
-    local diag = pg:FindFirstChild('VortexR28StartupDiagnostics')
-    if diag then diag:Destroy() end
+    print('[VORTEX r23] New responsive GUI loaded; old interface disabled')
 end
 
 return context
