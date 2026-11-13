@@ -1,6 +1,6 @@
--- VORTEX AUTO FARM r33 | laser corridors, shockwave gaps, closing-circle center | full UI
+-- VORTEX AUTO FARM r34 | shared time-aware Voidsbane route safety | full UI
 -- r30: no new locals added to the dodge function; reuse the existing hazard-aware nav layer.
-warn('[VORTEX r33] SOURCE STARTED - if absent, loader never executed the file')
+warn('[VORTEX r34] SOURCE STARTED - if absent, loader never executed the file')
 local __vortexStartupStatus = nil
 pcall(function()
     local lp = game:GetService('Players').LocalPlayer
@@ -22,15 +22,15 @@ pcall(function()
         label.BackgroundColor3 = Color3.fromRGB(30,15,20)
         label.BackgroundTransparency = 0.12
         label.TextColor3 = Color3.fromRGB(255,230,235)
-        label.Text = 'VORTEX r33: source running...'
+        label.Text = 'VORTEX r34: source running...'
         label.Parent = gui
         __vortexStartupStatus = label
     end
 end)
 local function __vortexStage(stage)
-    warn('[VORTEX r33 STARTUP] '..tostring(stage))
+    warn('[VORTEX r34 STARTUP] '..tostring(stage))
     if __vortexStartupStatus then
-        pcall(function() __vortexStartupStatus.Text = 'VORTEX r33: '..tostring(stage) end)
+        pcall(function() __vortexStartupStatus.Text = 'VORTEX r34: '..tostring(stage) end)
     end
 end
 
@@ -70,7 +70,7 @@ end
     ==============================================================
 --]]
 
-warn('[VORTEX AUTO FARM r33] Active; r25 base and r33 safe movement patches')
+warn('[VORTEX AUTO FARM r34] Active; r25 base with r34 unified movement fixes')
 local players = game:GetService("Players")
 local player = players.LocalPlayer
 while not player do
@@ -125342,7 +125342,7 @@ components.voidsbaneV3 = function(context)
                 while node.Parent and node.Parent~=effects do node=node.Parent end
                 local cname=node.Name:lower()
                 if part.Parent and part.Parent.Name:lower()=='bars' then cname='bars' end
-                if cname~='glyphglow' and (cname~='passive' or part.Name:lower()=='precast') and (part.Transparency<0.95 or part.Name:lower()=='hitbox') and part.Size.Magnitude>=1.5 then
+                if cname~='glyphglow' and (cname~='passive' or part.Name:lower()=='precast' or part.Name:lower()=='secondbosslonglingeringline' or (part.Parent and part.Parent.Name:lower()=='secondbosslonglingeringline')) and (part.Transparency<0.95 or part.Name:lower()=='hitbox') and part.Size.Magnitude>=1.5 then
                     local pos=part.Position
                     local tr=visual.track[part]
                     if not tr then
@@ -125522,14 +125522,15 @@ components.voidsbaneV3 = function(context)
                 local d=step*3
                 local px,pz=pos.X+dir.X*d,pos.Z+dir.Z*d
                 if vector(bossP) and distance(px,pz,bossP)>maxR then break end
-                if context.v3DangerAt(px,pos.Y,pz,d/speed+0.15)>=2 then break end
+                if context.v3DangerAt(px,pos.Y,pz,d/speed+0.15)>=2
+                    or not context.v3LaserPathClear(pos,Vector3.new(px,pos.Y,pz)) then break end
                 len=d
             end
             local score=len
             if heading.Magnitude>0.1 then score+=dir:Dot(heading.Unit)*6 end
             if vector(bossP) then
                 local toB=Vector3.new(bossP.X-pos.X,0,bossP.Z-pos.Z)
-                if toB.Magnitude>1 then score-=math.abs(dir:Dot(toB.Unit))*8 end
+                if toB.Magnitude>1 then score+=dir:Dot(toB.Unit)*4 end
             end
             if score>bestScore then bestDir,bestLen,bestScore=dir,len,score end
         end
@@ -126440,147 +126441,47 @@ components.voidsbaneV3 = function(context)
                 return anchor,10,'behind the boss before the meteor barrage'
             end
         end
-        if meteor and meteor~=state.meteorFollowup and meteor.cfg and number(meteor.t0) and number(meteor.cfg.endAt)
-            and now>=meteor.t0 and now<meteor.t0+meteor.cfg.endAt
+        if meteor and meteor~=state.meteorFollowup and meteor.cfg and number(meteor.t0)
+            and number(meteor.cfg.endAt) and now>=meteor.t0 and now<meteor.t0+meteor.cfg.endAt
             and vector(meteor.ground) and vector(meteor.forward) then
-            -- Meteors rain over the whole arena, so the safe ground is wherever the
-            -- scheduled impacts are furthest away. Sampling a ring is cheaper and
-            -- more reliable than guessing at the stairs corner.
+            local speedNow=math.max(16,rt.speedNow or 20)
             local held=state.meteorRefuge
-            if vector(held) then
-                local clearHeld=context.v3DangerAt(held.X,held.Y,held.Z,0.4)<3
-                if clearHeld then
-                    return held,8,'meteor refuge: holding the clear ground'
-                end
-                state.meteorRefuge=nil
-            state.arenaRadius=nil
-            pcall(function() context.v3MeasureArena() end)
+            if vector(held) and context.v3LegSafe(pos,held,speedNow)
+                and context.v3DangerAt(held.X,held.Y,held.Z,0.8)<2 then
+                return held,5,'meteor refuge: reachable clear corridor'
             end
-            local refuge,refugeClear=nil,-math.huge
-            for i=0,15 do
-                local ang=i*math.pi/8
-                local cand=Vector3.new(pos.X+math.cos(ang)*42,pos.Y,pos.Z+math.sin(ang)*42)
-                local clear=math.huge
-                for _,h in ipairs(state.plans) do
-                    if (h.kind=='MeteorLock' or h.kind=='Impact' or h.kind=='Pool') and (vector(h.p.point) or vector(h.p.center)) then
-                        local centre=vector(h.p.point) and h.p.point or h.p.center
-                        local radius=h.p.radius or (h.p.cfg and (h.p.cfg.outerHit or h.p.cfg.outer)) or 18
-                        clear=math.min(clear,distance(cand.X,cand.Z,centre)-radius)
-                    end
-                end
-                if clear>refugeClear then refugeClear,refuge=clear,cand end
-            end
-            if refuge and refugeClear>-math.huge then
-                state.meteorRefuge=refuge
-                return refuge,8,'meteor refuge: emptiest ground'
-            end
-            local f=Vector3.new(meteor.forward.X,0,meteor.forward.Z)
-            if f.Magnitude>0.01 then
-                return meteor.ground-f.Unit*(tonumber(cfg.gsV3MeteorBehind) or 12),5,'behind boss for sky meteors'
-            end
-        end
-        -- Heated / superheated shockwaves: every ring has its own openings, so hold an angle
-        -- that is inside the opening corridor of ALL active rings at the same time. The
-        -- corridor is radial: a door is doorHalfWidth studs wide at any radius, so the
-        -- angular tolerance shrinks as the character stands further out.
-        local ringGroups,ringOrigin,ringHalf={},nil,nil
-        for _,h in ipairs(state.plans) do
-            if h.kind=='Lance' and h.expires>now and h.p and vector(h.p.origin) then
-                local t=h.p.timing or {}
-                local active={}
-                local radiusToPlayer=distance(pos.X,pos.Z,h.p.origin)
-                local nearestTime=math.huge
-                for _,ring in pairs(h.p.rings or {}) do
-                    if type(ring)=='table' and type(ring.doors)=='table' and number(ring.launch) then
-                        local released=ring.stand and h.p.releaseAt and now>=h.p.releaseAt+(t.standFade or 0.8)
-                        local elapsed=now-(h.p.t0 or now)-ring.launch
-                        local lifeEnd=(h.p.t0 or now)+ring.launch+(ring.stand and (ring.standMax or ring.life) or ring.life or t.ringLife or 3.3)
-                        if not released and now<lifeEnd and elapsed>-1.8 then
-                            local front=elapsed>0 and math.log(1+elapsed/0.6)*52 or 0
-                            local delta=math.abs(front-radiusToPlayer)
-                            local priority=delta+math.max(0,-elapsed)*15
-                            if priority<nearestTime then nearestTime=priority end
-                            active[#active+1]={ring=ring,priority=priority}
+            state.meteorRefuge=nil
+            local best,bestScore=nil,math.huge
+            local boss=context.v3BossPoint()
+            local arena=state.passive and state.passive.glyph
+            local arenaR=context.v3ArenaRadius()
+            -- Search 32 directions and two SHORT distances; longer escapes go via normal A*.
+            for _,travel in ipairs({15,27}) do
+                for i=0,31 do
+                    local angle=i*math.pi/16
+                    local dest=pos+Vector3.new(math.cos(angle)*travel,0,math.sin(angle)*travel)
+                    if (not vector(arena) or distance(dest.X,dest.Z,arena)<arenaR-3)
+                        and context.v3LegSafe(pos,dest,speedNow) then
+                        local arrival=travel/speedNow
+                        local danger=math.max(context.v3DangerAt(dest.X,dest.Y,dest.Z,arrival+0.2),
+                            context.v3DangerAt(dest.X,dest.Y,dest.Z,arrival+0.8))
+                        if danger<3 then
+                            local score=danger*100+travel*0.12
+                            if vector(boss) then score+=distance(dest.X,dest.Z,boss)*0.22 end
+                            if score<bestScore then best,bestScore=dest,score end
                         end
                     end
                 end
-                -- Only the imminent wavefront owns our heading. Separate rings often
-                -- have incompatible doors; trying to intersect all doors leaves no corridor.
-                local imminent={}
-                for _,item in ipairs(active) do
-                    if item.priority<=nearestTime+12 then imminent[#imminent+1]=item.ring end
-                end
-                active=imminent
-                if #active>0 then
-                    ringGroups[#ringGroups+1]=active
-                    ringOrigin=ringOrigin or h.p.origin
-                    ringHalf=ringHalf or (t.doorHalfWidth or 9)
-                end
             end
+            if best then
+                state.meteorRefuge=best
+                return best,5,'meteor refuge: safe short path'
+            end
+            -- If every route is hazardous, avoid selecting a distant unverified point;
+            -- the main dodge scorer will choose the least dangerous reachable leg.
         end
-        if #ringGroups>0 and vector(ringOrigin) then
-            local radiusNow=math.max(12,distance(pos.X,pos.Z,ringOrigin))
-            local hereAng=math.atan2(pos.Z-ringOrigin.Z,pos.X-ringOrigin.X)
-            local spawnPart=world:FindFirstChild("bonusBossPlayerSpawnPart")
-            local entranceAng=nil
-            if spawnPart and spawnPart:IsA("BasePart") then
-                entranceAng=math.atan2(spawnPart.Position.Z-ringOrigin.Z,spawnPart.Position.X-ringOrigin.X)
-            end
-            -- First placement faces the boss: crossing the wall on the boss side keeps the
-            -- character in damage range and leaves the shortest path back in.
-            local bossAng=nil
-            local bossRing=context.v3BossPoint()
-            if vector(bossRing) then
-                bossAng=math.atan2(bossRing.Z-ringOrigin.Z,bossRing.X-ringOrigin.X)
-            end
-            local bestAng,bestScore=nil,-math.huge
-            for i=0,71 do
-                local ang=i*math.pi/36
-                local clearance=math.huge
-                for _,group in ipairs(ringGroups) do
-                    for _,ring in ipairs(group) do
-                        local nearest=math.huge
-                        for _,opening in pairs(ring.doors) do
-                            if number(opening) then
-                                local delta=math.abs((opening-ang+math.pi)%(2*math.pi)-math.pi)
-                                if delta<nearest then nearest=delta end
-                            end
-                        end
-                        if nearest<math.huge then
-                            local margin=ringHalf-nearest*radiusNow
-                            if margin<clearance then clearance=margin end
-                        end
-                    end
-                end
-                if clearance>-math.huge then
-                    local travel=math.abs((ang-hereAng+math.pi)%(2*math.pi)-math.pi)
-                    local toBoss=bossAng and math.abs((ang-bossAng+math.pi)%(2*math.pi)-math.pi) or 0
-                    local score=math.min(clearance,ringHalf*0.6)*0.8-math.max(0,-clearance)*9-travel*1.2-toBoss*1.6
-                    -- Do not reward the entrance/spawn side: boss flank wins ties.
-                    if score>bestScore then bestScore,bestAng=score,ang end
-                end
-            end
-            if bestAng then
-                -- Walk AROUND the ring at our current radius, never cut inward across
-                -- its hot face. Small angular steps lead through its next live opening.
-                local turn=(bestAng-hereAng+math.pi)%(2*math.pi)-math.pi
-                local nextAng=hereAng+math.clamp(turn,-math.pi/10,math.pi/10)
-                local holdRadius=math.clamp(radiusNow,12,math.max(16,context.v3ArenaRadius()-7))
-                local target=Vector3.new(ringOrigin.X+math.cos(nextAng)*holdRadius,pos.Y,
-                    ringOrigin.Z+math.sin(nextAng)*holdRadius)
-                if math.abs(turn)<math.pi/30 then
-                    target=Vector3.new(ringOrigin.X+math.cos(bestAng)*holdRadius,pos.Y,
-                        ringOrigin.Z+math.sin(bestAng)*holdRadius)
-                end
-                -- A visible yellow stripe overrides a predicted safe opening.
-                if context.v3LaserPathClear and not context.v3LaserPathClear(pos,target) then
-                    local tangent=Vector3.new(-math.sin(hereAng),0,math.cos(hereAng))
-                    local alternate=pos+tangent*(turn<0 and -8 or 8)
-                    if context.v3LaserPathClear(pos,alternate) then target=alternate else return nil end
-                end
-                return target,math.max(2,ringHalf*0.35),'superheated shockwave opening'
-            end
-        end
+        -- Shockwave opening is handled ahead of breath/meteor by v3ShockwaveTarget;
+        -- do not recompute incompatible gap angles here.
         if target then return target,radius,'back near spawn, lining up the wall gap' end
         -- Return-to-glyph rule: the instant nothing overlaps the symbol, resume rune duty.
         local glyphRet=state.passive and state.passive.glyph
@@ -126641,6 +126542,49 @@ components.voidsbaneV3 = function(context)
         local angle=i*math.pi/16
         radialDirections[i+1]=Vector3.new(math.cos(angle),0,math.sin(angle))
     end
+    -- Shared emergency heading: allow a safe lateral approach when the direct leg
+    -- to the closing center/shockwave opening is blocked by a laser or meteor.
+    context.v3UrgentSteer=function(pos,goal,speed,kind)
+        if not vector(goal) then return nil end
+        local to=Vector3.new(goal.X-pos.X,0,goal.Z-pos.Z)
+        speed=math.max(16,tonumber(speed) or 20)
+        if to.Magnitude<2 then
+            -- Reaching the center is not permission to stop under a tracked meteor.
+            if kind~='circle' then return nil end
+            if math.max(context.v3DangerAt(pos.X,pos.Y,pos.Z,0.5),
+                context.v3DangerAt(pos.X,pos.Y,pos.Z,1.1))<1 then return Vector3.zero end
+            local escape,escapeRisk=nil,math.huge
+            for i=1,#radialDirections do
+                local dir=radialDirections[i]
+                local nearby=pos+dir*7
+                if context.v3LegSafe(pos,nearby,speed) then
+                    local risk=math.max(context.v3DangerAt(nearby.X,nearby.Y,nearby.Z,0.5),
+                        context.v3DangerAt(nearby.X,nearby.Y,nearby.Z,1.1))
+                    if risk<escapeRisk then escapeRisk,escape=risk,dir end
+                end
+            end
+            return escape
+        end
+        local best,bestScore=nil,math.huge
+        local boss=context.v3BossPoint()
+        for i=0,#radialDirections do
+            local dir=i==0 and to.Unit or radialDirections[i]
+            local leg=pos+dir*math.min(11,to.Magnitude)
+            if context.v3LegSafe(pos,leg,speed) then
+                local dx=goal.X-leg.X
+                local dz=goal.Z-leg.Z
+                local score=math.sqrt(dx*dx+dz*dz)
+                if kind=='circle' then
+                    -- Closing wall wins even over a meteor, unless the leg is genuinely lethal.
+                    score+=math.max(0,context.v3DangerAt(leg.X,leg.Y,leg.Z,0.6))*12
+                end
+                if vector(boss) then score+=distance(leg.X,leg.Z,boss)*0.035 end
+                if score<bestScore then bestScore,best=score,dir end
+            end
+        end
+        return best
+    end
+
     -- r33: illuminated floor-laser corridor guard (both X and Z aligned; diagonal too).
     -- Cache geometric footprints so a sampling stride cannot skip a thin laser warning.
     context.v3LaserCache={at=-math.huge,parts={}}
@@ -126669,8 +126613,8 @@ components.voidsbaneV3 = function(context)
                         end
                         local name=part.Name:lower()
                         local pName=parent and parent.Name:lower() or ''
-                        local isFloorBeam=rootName=='bars' or pName=='bars'
-                            or (rootName=='passive' and name=='precast')
+                        local isFloorBeam=rootName=='bars' or pName=='bars' or rootName=='beams' or pName=='beams'
+                            or (rootName=='passive' and (name=='precast' or name=='secondbosslonglingeringline' or pName=='secondbosslonglingeringline'))
                             or ((rootName=='laser' or rootName=='lasers' or rootName=='groundbeam')
                                 and (name=='part' or name:find('beam',1,true)))
                         if isFloorBeam then
@@ -126682,7 +126626,7 @@ components.voidsbaneV3 = function(context)
                             local longest=math.max(sx,sz)
                             local thin=math.min(sx,sz)
                             if hot and not purple and longest>12 and thin<longest*0.65
-                                and sy<16 and math.abs(part.CFrame.UpVector.Y)>0.5 then
+                                and sy<10 and math.abs(part.CFrame.UpVector.Y)>0.78 then
                                 -- A horizontal warning stripe has local X/Z axes, regardless of
                                 -- its world orientation. This covers vertical and horizontal map lines.
                                 observed[#observed+1]={part=part,cf=part.CFrame,
@@ -126729,21 +126673,59 @@ components.voidsbaneV3 = function(context)
     end
 
     -- Closing-cylinder target comes from its live payload, not the boss or spawn.
+    -- r34: one route-safety gate used by ordinary dodges and critical-mechanic steering.
+    -- Pixel-colour geometry and announced future hazards both apply to the WHOLE walked leg.
+    context.v3LegSafe=function(from,to,speed)
+        if not vector(from) or not vector(to) then return false end
+        if not context.v3LaserPathClear(from,to) then return false end
+        local dist=Vector3.new(to.X-from.X,0,to.Z-from.Z).Magnitude
+        if dist<0.2 then return true end
+        speed=math.max(12,tonumber(speed) or 20)
+        local start=context.v3Nav and context.v3Nav.hazardAt and context.v3Nav.hazardAt(from,0) or context.v3DangerAt(from.X,from.Y,from.Z,0)
+        -- Starting in a pending impact is not a reason to freeze. Compare against
+        -- the danger about to hit the player's CURRENT position, then demand that
+        -- a retreat does not become more dangerous again along the leg.
+        local imminent=context.v3Nav and context.v3Nav.hazardSpan
+            and context.v3Nav.hazardSpan(from,0.35)
+            or context.v3DangerAt(from.X,from.Y,from.Z,0.55)
+        local previous=math.max(0,start,imminent)
+        for i=1,math.max(1,math.ceil(dist/3)) do
+            local part=i/math.max(1,math.ceil(dist/3))
+            local p=from:Lerp(to,part)
+            local t=dist*part/speed
+            local value
+            if context.v3Nav and context.v3Nav.hazardSpan then value=context.v3Nav.hazardSpan(p,t)
+            else value=math.max(context.v3DangerAt(p.X,p.Y,p.Z,t+0.12),context.v3DangerAt(p.X,p.Y,p.Z,t+0.45)) end
+            -- Danger may decrease when escaping an already occupied strike, not spike again.
+            if value>math.max(0.35,previous+0.35) then return false end
+            previous=math.min(previous,value)
+        end
+        return true
+    end
+
     context.v3ClosingCentre=function(pos,now)
-        local best,score=nil,math.huge
+        local best,bestScore=nil,math.huge
         for _,plan in ipairs(state.plans) do
             if plan.kind=='Beams' and plan.expires>now and plan.p and plan.p.cfg then
                 local c=plan.p.cfg
-                local greenAt=(tonumber(c.closeStart) or 1)+(tonumber(c.closeTime) or 2)
+                local release=(tonumber(c.closeStart) or 1)+(tonumber(c.closeTime) or 2)
                     -(tonumber(c.greenLead) or 0)+(tonumber(c.greenLate) or 0)
                 for _,beam in ipairs(plan.p.beams or {}) do
                     if vector(beam.center) and number(beam.startAt) then
                         local elapsed=now-beam.startAt
-                        local radius=tonumber(beam.r0) or tonumber(c.endRadius) or 20
                         local gap=distance(pos.X,pos.Z,beam.center)
-                        if elapsed>=-0.7 and elapsed<greenAt-0.25 and gap<radius+42 then
-                            local candidate=Vector3.new(beam.center.X,pos.Y,beam.center.Z)
-                            if gap<score then best,score=candidate,gap end
+                        local remaining=release-elapsed
+                        local initial=tonumber(beam.r0) or 35
+                        local inner=tonumber(c.endRadius) or 16
+                        local speed=math.max(16,rt.speedNow or 20)
+                        -- Only commit if the shrinking wall belongs to this player's area and
+                        -- the target is still reachable before the closing/green transition.
+                        if elapsed>=-1.6 and remaining>0.2
+                            and gap<=math.max(initial+28,inner+speed*math.max(remaining,0)+6) then
+                            local score=gap+math.max(0,elapsed)*1.5
+                            if score<bestScore then
+                                best,bestScore=Vector3.new(beam.center.X,pos.Y,beam.center.Z),score
+                            end
                         end
                     end
                 end
@@ -126751,6 +126733,58 @@ components.voidsbaneV3 = function(context)
         end
         return best
     end
+    -- r34: identify the NEAREST imminent superheated ring, not all rings at once.
+    context.v3ShockwaveTarget=function(pos,now)
+        local ringBest,originBest,timingBest,etaBest=nil,nil,nil,math.huge
+        for _,h in ipairs(state.plans) do
+            if h.kind=='Lance' and h.expires>now and h.p and vector(h.p.origin) then
+                local radius=math.max(6,distance(pos.X,pos.Z,h.p.origin))
+                for _,ring in ipairs(h.p.rings or {}) do
+                    if type(ring)=='table' and type(ring.doors)=='table' and number(ring.launch) then
+                        local elapsed=now-h.p.t0-ring.launch
+                        local life=tonumber(ring.stand and ring.standMax or ring.life)
+                            or tonumber(h.p.timing and h.p.timing.ringLife) or 3.3
+                        local released=ring.stand and h.p.releaseAt and now>=h.p.releaseAt
+                            +(tonumber(h.p.timing.standFade) or 0.8)
+                        if not released and elapsed<life and elapsed>-1.9 then
+                            local impactAt=h.p.t0+ring.launch+0.6*(math.exp(radius/52)-1)
+                            local eta=impactAt-now
+                            -- A wave already moving past the player is not a reason
+                            -- to abandon a new meteor/beam dodge.
+                            if eta>-0.22 and eta<3.8 and eta<etaBest then
+                                ringBest,originBest,timingBest,etaBest=ring,h.p.origin,h.p.timing,eta
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if not ringBest then return nil end
+        local radius=math.max(6,distance(pos.X,pos.Z,originBest))
+        local here=math.atan2(pos.Z-originBest.Z,pos.X-originBest.X)
+        local bestAngle,bestDelta=nil,math.huge
+        local boss=context.v3BossPoint()
+        local bossAngle=vector(boss) and math.atan2(boss.Z-originBest.Z,boss.X-originBest.X) or nil
+        for _,opening in pairs(ringBest.doors) do
+            if number(opening) then
+                local delta=(opening-here+math.pi)%(2*math.pi)-math.pi
+                local score=math.abs(delta)
+                if bossAngle then score+=math.abs((opening-bossAngle+math.pi)%(2*math.pi)-math.pi)*0.07 end
+                if score<bestDelta then bestAngle,bestDelta=opening,score end
+            end
+        end
+        if not bestAngle then return nil end
+        local turn=(bestAngle-here+math.pi)%(2*math.pi)-math.pi
+        local half=(tonumber(timingBest and timingBest.doorHalfWidth) or 9)-
+            (tonumber(cfg.gsV3Pad) or 3)-2
+        local tolerance=math.max(0.025,half/math.max(radius,8))
+        if math.abs(turn)<=tolerance then return nil end
+        local travel=math.clamp(turn,-10/math.max(radius,10),10/math.max(radius,10))
+        local nextAngle=here+travel
+        return Vector3.new(originBest.X+radius*math.cos(nextAngle),pos.Y,
+            originBest.Z+radius*math.sin(nextAngle)),etaBest
+    end
+
     -- r14 navigation. Roblox PathfindingService handles far or obstructed legs; plain humanoid
     -- walking takes over inside cfg.gsV3PathSwitchDist when the straight line is open and clear of
     -- attacks. PathfindingService knows nothing about attack telegraphs, so every leg it returns is
@@ -127076,35 +127110,25 @@ components.voidsbaneV3 = function(context)
             pcall(function() context.setState('VOIDSBANE V3: white explosion imminent') end)
             return
         end
-        -- r33: close into the moving cylinder BEFORE the regular meteor/breath planner.
-        -- Prefer the centre while the walls contract; if a direct line crosses a laser,
-        -- take a safe small sidestep instead of charging through the stripe.
+        -- r34: critical arena mechanics outrank a randomly chosen meteor heading.
+        -- Their route is still checked against the same predicted and visual hazards.
         do
-            local centre=context.v3ClosingCentre(root.Position,serverNow)
-            if centre and distance(root.Position.X,root.Position.Z,centre)>3.5 then
-                local delta=Vector3.new(centre.X-root.Position.X,0,centre.Z-root.Position.Z)
-                local pace=math.max(16,rt.speedNow or humanoid.WalkSpeed)
-                local straight=delta.Unit
-                local bestDir,bestScore=nil,math.huge
-                for i=0,#radialDirections do
-                    local dir=i==0 and straight or radialDirections[i]
-                    if dir and dir:Dot(straight)>-0.15 then
-                        local leg=root.Position+dir*math.min(12,delta.Magnitude)
-                        if context.v3LaserPathClear(root.Position,leg)
-                            and nav.lineSafe(root.Position,leg,pace,nav.hazardAt(root.Position,0),0) then
-                            local score=distance(leg.X,leg.Z,centre)
-                                + math.max(0,context.v3DangerAt(leg.X,leg.Y,leg.Z,0.5))*12
-                            if score<bestScore then bestScore,bestDir=score,dir end
-                        end
-                    end
-                end
-                if bestDir then
-                    state.heading,state.headingActive=bestDir,true
-                    state.dodgeReason='closing cylinder: move to real centre'
-                    if context.MV then context.MV.cmdDir,context.MV.cmdAt,context.MV.driving=bestDir,now,true end
-                    context.LC.steer(bestDir)
-                    humanoid:Move(bestDir,false)
-                    pcall(function() context.setState('VOIDSBANE V3: closing circle centre') end)
+            local target=context.v3ClosingCentre(root.Position,serverNow)
+            local reason='closing circle centre'
+            if not target then
+                target=context.v3ShockwaveTarget(root.Position,serverNow)
+                reason='superheated shockwave opening'
+            end
+            if target then
+                local dir=context.v3UrgentSteer(root.Position,target,rt.speedNow or humanoid.WalkSpeed,
+                    reason=='closing circle centre' and 'circle' or 'shockwave')
+                if dir then
+                    state.heading,state.headingActive=dir,true
+                    state.dodgeReason=reason
+                    if context.MV then context.MV.cmdDir,context.MV.cmdAt,context.MV.driving=dir,now,true end
+                    context.LC.steer(dir)
+                    humanoid:Move(dir,false)
+                    pcall(function() context.setState('VOIDSBANE V3: '..reason) end)
                     return
                 end
             end
@@ -127266,7 +127290,8 @@ components.voidsbaneV3 = function(context)
                 local dir=side*sign
                 local dest=root.Position+dir*math.max(9,redLane.width+7)
                 local danger=context.v3DangerAt(dest.X,dest.Y,dest.Z,0.6)
-                local score=danger*100
+                local score=context.v3LegSafe(root.Position,dest,rt.speedNow or humanoid.WalkSpeed)
+                    and danger*100 or math.huge
                 if vector(bossPoint) then score+=distance(dest.X,dest.Z,bossPoint)*0.12 end
                 if sign<0 then score+=2 end
                 if score<bestScore then bestScore,chosenSide=score,dir end
@@ -127298,6 +127323,7 @@ components.voidsbaneV3 = function(context)
                 local p2=root.Position+dir*20
                 if context.v3DangerAt(p1.X,p1.Y,p1.Z,0.4)>=4 then return false end
                 if context.v3DangerAt(p2.X,p2.Y,p2.Z,0.9)>=4 then return false end
+                if not context.v3LegSafe(root.Position,p2,rt.speedNow or humanoid.WalkSpeed) then return false end
                 if vector(arenaO) and distance(p2.X,p2.Z,arenaO)>maxRO then return false end
                 return true
             end
@@ -127735,7 +127761,7 @@ components.voidsbaneV3 = function(context)
             -- A full-horizon ray rejects every heading inside a rotating wall and
             -- leaves the player frozen while the attack arrives.
             local reach=(projected(dir,math.min(horizon,0.9))-pos).Magnitude
-            if reach>0 and not context.v3LaserPathClear(pos,pos+dir*reach) then return false end
+            if reach>0 and not context.v3LegSafe(pos,pos+dir*reach,speed) then return false end
             if reach>0 and world:Raycast(pos,dir*reach,params) then return false end
             for step=1,math.ceil(reach/8) do
                 local target=pos+dir*math.min(step*8,reach)
@@ -170381,13 +170407,13 @@ local __uiRestoreOK,__uiRestoreErr = pcall(function()
         error('DungeonAutofarmUI was not created by the original interface module')
     end
     original.Enabled = true
-    warn('[VORTEX r33] Complete original UI restored (advanced features and sliders available)')
+    warn('[VORTEX r34] Complete original UI restored (advanced features and sliders available)')
 end)
 if not __uiRestoreOK then
     __vortexStage('original UI restore failed: '..tostring(__uiRestoreErr))
-    warn('[VORTEX r33 UI] '..tostring(__uiRestoreErr))
+    warn('[VORTEX r34 UI] '..tostring(__uiRestoreErr))
 else
-    __vortexStage('READY - full Vortex UI r33')
+    __vortexStage('READY - full Vortex UI r34')
     pcall(function() if __vortexStartupStatus then __vortexStartupStatus.Parent:Destroy() end end)
 end
 
