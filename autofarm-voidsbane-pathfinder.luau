@@ -1,4 +1,4 @@
--- VORTEX AUTO FARM r27 | legacy dungeon tables restored; laser-aware dodging
+-- VORTEX AUTO FARM r28 | diagnostic startup, reload disabled, r27 movement retained
 -- Auto Farm r24 | VORTEX | endgame dungeon selection + stale attack cleanup
 -- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
@@ -6,28 +6,16 @@
 -- Voidsbane: Roblox PathfindingService for dodging + boss approach, plain humanoid walking inside gsV3PathSwitchDist.
 -- r15 nav: time-aware, monotone-escape pathing (see nav.* and the grid router in v3DodgeApply).
 -- IMPORTANT: install this r21 file at HarvardLabs/autofarm-working.luau for teleport persistence.
--- Reload this installed copy after dungeon teleports and replay.
-do
-    local env = type(getgenv) == 'function' and getgenv() or _G
-    local queue = queue_on_teleport or queueonteleport
-    if type(queue) == 'function' and env.PelicanQueuedJob ~= game.JobId then
-        local ok = pcall(queue, [[task.wait(2)
-local path = 'HarvardLabs/autofarm-working.luau'
-local ok, source = pcall(readfile, path)
-if ok then
-    local fn, err = loadstring(source, 'DungeonAutofarm.working')
-    if fn then fn() else warn('[DQ reload] '..tostring(err)) end
-else warn('[DQ reload] '..tostring(source)) end]])
-        if ok then env.PelicanQueuedJob = game.JobId end
-    end
-end
+-- r28: teleport auto-reload disabled to prevent an old installed copy replacing this version.
+-- Re-enable only after confirming the executor and installed script support it.
+warn('[VORTEX r28] Starting source; teleport auto-reload disabled')
 --[[
     ==============================================================
     DEOBFUSCATED BY @notninjaa3530 (Discord)
     ==============================================================
 --]]
 
-warn("[VORTEX AUTO FARM r21] Loaded. If the UI does not show r21, an older script is running.")
+warn("[VORTEX AUTO FARM r28] Main script reached")
 local players = game:GetService("Players")
 local player = players.LocalPlayer
 while not player do
@@ -170227,7 +170215,7 @@ do
     UIS.InputEnded:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
     tabs['Auto Farm'].tab:Activate()
     tabs['Auto Farm'].page.Visible=true;tabs['Auto Farm'].tab.BackgroundColor3=C.accent;tabs['Auto Farm'].tab.TextColor3=C.white
-    print('[VORTEX r23] New responsive GUI loaded; old interface disabled')
+    print('[VORTEX r28] Responsive GUI loaded')
 end
 
 return context
