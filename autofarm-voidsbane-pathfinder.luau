@@ -153946,7 +153946,7 @@ components.interfaceMainLoop = function(context)
             )
             helper15(
                 value73.content,
-                "Rodin clears",
+                "Bonus boss reports",
                 "whRodin",
                 2,
                 "A message every time Odin Reincarnation, the bonus boss, is beaten."
@@ -169994,4 +169994,129 @@ context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
 if context.MM and context.MM.setView then context.MM.setView('2d') end
+-- VORTEX r23: replacement responsive interface; legacy UI disabled, gameplay retained.
+do
+    local Players = game:GetService('Players')
+    local UIS = game:GetService('UserInputService')
+    local Tween = game:GetService('TweenService')
+    local player = Players.LocalPlayer
+    local pg = player:WaitForChild('PlayerGui')
+    local old = pg:FindFirstChild('DungeonAutofarmUI')
+    if old then old.Enabled = false end
+    local previous = pg:FindFirstChild('VortexAutoFarmR23')
+    if previous then previous:Destroy() end
+    local gui = Instance.new('ScreenGui')
+    gui.Name = 'VortexAutoFarmR23'; gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = false; gui.DisplayOrder = 500
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling; gui.Parent = pg
+    local C = {bg=Color3.fromRGB(13,10,14),panel=Color3.fromRGB(27,19,26),tile=Color3.fromRGB(36,24,32),accent=Color3.fromRGB(229,31,64),white=Color3.fromRGB(248,244,247),muted=Color3.fromRGB(184,160,172),line=Color3.fromRGB(69,35,49)}
+    local function create(class, props, parent)
+        local o=Instance.new(class)
+        for k,v in pairs(props or {}) do o[k]=v end
+        o.Parent=parent
+        return o
+    end
+    local function round(o,r) create('UICorner',{CornerRadius=UDim.new(0,r or 12)},o) end
+    local function text(parent, value, size, color, bold)
+        return create('TextLabel',{BackgroundTransparency=1,Text=value,Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham,TextSize=size or 14,TextColor3=color or C.white,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true,Size=UDim2.new(1,0,0,28)},parent)
+    end
+    local function button(parent,label,callback)
+        local b=create('TextButton',{BackgroundColor3=C.tile,Text=label,TextColor3=C.white,Font=Enum.Font.GothamMedium,TextSize=13,AutoButtonColor=true,Size=UDim2.new(1,0,0,42)},parent)
+        round(b,10); b.MouseButton1Click:Connect(callback); return b
+    end
+    local window=create('Frame',{Name='Window',AnchorPoint=Vector2.new(.5,.5),Position=UDim2.fromScale(.5,.5),Size=UDim2.fromOffset(560,440),BackgroundColor3=C.bg,BorderSizePixel=0},gui)
+    round(window,18); create('UIStroke',{Color=C.line,Thickness=1},window)
+    create('UISizeConstraint',{MinSize=Vector2.new(285,290),MaxSize=Vector2.new(660,620)},window)
+    local scale=create('UIScale',{Scale=1},window)
+    local function resize()
+        local cam=workspace.CurrentCamera
+        local view=cam and cam.ViewportSize or Vector2.new(800,600)
+        scale.Scale=math.min(1,math.max(.56,math.min((view.X-20)/560,(view.Y-70)/440)))
+    end
+    resize()
+    if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal('ViewportSize'):Connect(resize) end
+    local header=create('Frame',{BackgroundTransparency=1,Size=UDim2.new(1,-28,0,74),Position=UDim2.fromOffset(14,10)},window)
+    local emblem=create('TextLabel',{Text='V',TextSize=22,Font=Enum.Font.GothamBlack,TextColor3=C.white,BackgroundColor3=C.accent,Size=UDim2.fromOffset(46,46),Position=UDim2.fromOffset(2,6)},header); round(emblem,23)
+    local title=text(header,'VORTEX',23,C.white,true);title.Position=UDim2.fromOffset(62,3);title.Size=UDim2.new(1,-130,0,32)
+    local subtitle=text(header,'AUTO FARM  •  r23',11,C.muted);subtitle.Position=UDim2.fromOffset(63,34)
+    local collapse=create('TextButton',{Text='−',TextSize=25,Font=Enum.Font.GothamBold,TextColor3=C.white,BackgroundColor3=C.tile,Position=UDim2.new(1,-42,0,8),Size=UDim2.fromOffset(36,36)},header);round(collapse,10)
+    create('Frame',{BackgroundColor3=C.accent,BorderSizePixel=0,Size=UDim2.new(0,4,1,-30),Position=UDim2.fromOffset(0,15)},window)
+    local nav=create('Frame',{BackgroundTransparency=1,Position=UDim2.fromOffset(16,88),Size=UDim2.new(1,-32,0,40)},window)
+    local navLayout=create('UIListLayout',{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,7),SortOrder=Enum.SortOrder.LayoutOrder},nav)
+    local pages=create('Frame',{BackgroundTransparency=1,Position=UDim2.fromOffset(16,139),Size=UDim2.new(1,-32,1,-155)},window)
+    local tabs={};local active='Auto Farm'
+    local function newPage(name)
+        local tab=create('TextButton',{Text=name,TextColor3=C.muted,Font=Enum.Font.GothamMedium,TextSize=12,BackgroundColor3=C.tile,Size=UDim2.new(.25,-6,1,0)},nav);round(tab,9)
+        local page=create('ScrollingFrame',{BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=C.accent,Size=UDim2.fromScale(1,1),Visible=false,AutomaticCanvasSize=Enum.AutomaticSize.Y,CanvasSize=UDim2.fromOffset(0,0)},pages)
+        create('UIListLayout',{Padding=UDim.new(0,9),SortOrder=Enum.SortOrder.LayoutOrder},page)
+        create('UIPadding',{PaddingRight=UDim.new(0,8),PaddingBottom=UDim.new(0,10)},page)
+        tabs[name]={tab=tab,page=page}
+        tab.MouseButton1Click:Connect(function()
+            active=name
+            for key,v in pairs(tabs) do v.page.Visible=key==name;v.tab.BackgroundColor3=key==name and C.accent or C.tile;v.tab.TextColor3=key==name and C.white or C.muted end
+        end)
+        return page
+    end
+    local farm=newPage('Auto Farm');local combat=newPage('Combat');local wh=newPage('Webhooks');local settings=newPage('Settings')
+    local function section(parent,heading,description)
+        local f=create('Frame',{BackgroundColor3=C.panel,Size=UDim2.new(1,0,0,70),AutomaticSize=Enum.AutomaticSize.Y},parent);round(f,12)
+        create('UIPadding',{PaddingLeft=UDim.new(0,14),PaddingRight=UDim.new(0,14),PaddingTop=UDim.new(0,12),PaddingBottom=UDim.new(0,12)},f)
+        create('UIListLayout',{Padding=UDim.new(0,5)},f)
+        text(f,heading,15,C.white,true)
+        if description then text(f,description,12,C.muted) end
+        return f
+    end
+    local function toggle(parent,label,get,set)
+        local b=button(parent,'',function() end)
+        local function render() b.Text=label..'     '..(get() and '● ON' or '○ OFF') end
+        b.MouseButton1Click:Connect(function() set(not get());render() end)
+        render();return b
+    end
+    local cfg=context.CFG;local rt=context.RT
+    section(farm,'Dungeon automation','Boss-aware farming, routing and session controls')
+    toggle(farm,'Enable Auto Farm',function() return rt.farmEnabled==true end,function(v) rt.farmEnabled=v end)
+    toggle(farm,'Stay for bonus boss',function() return cfg.bonusBoss~=false end,function(v) cfg.bonusBoss=v;pcall(context.saveConfig) end)
+    toggle(farm,'Auto-detect class',function() return cfg.classAuto~=false end,function(v) cfg.classAuto=v;pcall(context.saveConfig) end)
+    section(combat,'Combat & movement','Existing dodge and boss pathfinding remain active')
+    toggle(combat,'Boss proximity',function() return cfg.bossClose~=false end,function(v) cfg.bossClose=v;pcall(context.saveConfig) end)
+    toggle(combat,'Visual minimap',function() return cfg.minimap==true end,function(v) cfg.minimap=v;pcall(context.saveConfig) end)
+    section(wh,'Discord notifications','Boss victories, failures, loot and HP remaining')
+    toggle(wh,'Send to Discord',function() return cfg.webhook==true end,function(v) cfg.webhook=v;pcall(context.saveConfig) end)
+    toggle(wh,'Bonus boss reports',function() return cfg.whRodin~=false end,function(v) cfg.whRodin=v;pcall(context.saveConfig) end)
+    local urlBox=create('TextBox',{PlaceholderText='Paste Discord webhook URL',Text=tostring(cfg.webhookUrl or ''),ClearTextOnFocus=false,TextSize=12,Font=Enum.Font.Gotham,TextColor3=C.white,PlaceholderColor3=C.muted,BackgroundColor3=C.tile,Size=UDim2.new(1,0,0,44)},wh);round(urlBox,10)
+    urlBox.FocusLost:Connect(function() local v=urlBox.Text;if v:match('^https://discord%.com/api/webhooks/') then cfg.webhookUrl=v;cfg.webhook=true;pcall(context.saveConfig) end end)
+    local status=text(wh,'Ready to test Discord delivery',12,C.muted)
+    button(wh,'Send a test message',function()
+        if not (context.WH and context.WH.post) then status.Text='Webhook sender unavailable';return end
+        status.Text='Sending test message…'
+        task.spawn(function()
+            local ok,result=pcall(function() return context.WH.post({username='Vortex',embeds={{title='VORTEX  •  Connection Test',description='Discord notifications are configured.',color=15015744,footer={text='Vortex | Auto Farm r23'}}}) end)
+            status.Text=ok and 'Request completed — check Discord / executor log' or ('Request failed: '..tostring(result))
+        end)
+    end)
+    section(settings,'Vortex settings','Modern black and red • responsive for touch and mouse')
+    button(settings,'Save configuration',function() pcall(context.saveConfig) end)
+    button(settings,'Show legacy advanced controls',function()
+        if old then old.Enabled=not old.Enabled end
+        gui.Enabled=not (old and old.Enabled)
+    end)
+    button(settings,'Close menu',function() window.Visible=false end)
+    local launcher=create('TextButton',{Text='V',Font=Enum.Font.GothamBlack,TextSize=23,TextColor3=C.white,BackgroundColor3=C.accent,Size=UDim2.fromOffset(48,48),Position=UDim2.new(0,14,1,-65),Visible=false},gui);round(launcher,24)
+    collapse.MouseButton1Click:Connect(function()window.Visible=false;launcher.Visible=true end)
+    launcher.MouseButton1Click:Connect(function()window.Visible=true;launcher.Visible=false end)
+    local dragging=false;local start;local initial
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=true;start=input.Position;initial=window.Position end
+    end)
+    UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+            local d=input.Position-start;window.Position=UDim2.new(initial.X.Scale,initial.X.Offset+d.X,initial.Y.Scale,initial.Y.Offset+d.Y)
+        end
+    end)
+    UIS.InputEnded:Connect(function(input)if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
+    tabs['Auto Farm'].tab:Activate()
+    tabs['Auto Farm'].page.Visible=true;tabs['Auto Farm'].tab.BackgroundColor3=C.accent;tabs['Auto Farm'].tab.TextColor3=C.white
+    print('[VORTEX r23] New responsive GUI loaded; old interface disabled')
+end
+
 return context
