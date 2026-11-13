@@ -1,3 +1,4 @@
+-- Auto Farm r24 | VORTEX | endgame dungeon selection + stale attack cleanup
 -- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
 -- Vortex UI r1: red/black palette, vortex ring, display font, glow, per-window scaling
@@ -1281,7 +1282,7 @@ components.coreSettings = function(context)
     config.colorTarget = Color3.fromRGB(255, 255, 255)
     config.colorAbility = Color3.fromRGB(80, 200, 255)
     config.autoQueue = false
-    config.autoQueueMap = "Northern Lands"
+    config.autoQueueMap = "Gilded Skies"
     config.autoQueueDifficulty = "Nightmare"
     config.autoQueueHardcore = false
     config.autoQueuePrivate = false
@@ -2153,7 +2154,7 @@ components.coreSettings = function(context)
                 autoQueueDelay = 8,
                 autoQueueDifficulty = "Insane",
                 autoQueueHardcore = false,
-                autoQueueMap = "Northern Lands",
+                autoQueueMap = "Gilded Skies",
                 autoQueuePrivate = true,
                 autoQueueReplay = true,
                 autoStandoff = true,
@@ -2305,7 +2306,7 @@ components.coreSettings = function(context)
                 autoQueueDelay = 8,
                 autoQueueDifficulty = "Insane",
                 autoQueueHardcore = false,
-                autoQueueMap = "Northern Lands",
+                autoQueueMap = "Gilded Skies",
                 autoQueuePrivate = true,
                 autoQueueReplay = true,
                 autoStandoff = true,
@@ -32174,6 +32175,16 @@ components.hazardReader = function(context)
             end
         end
         hazardReader.enemies = enemies
+        -- r24: Record the last live hostile. Dead casters can leave visual effects
+        -- in Workspace; these should not keep predicted attack zones alive.
+        if #enemies > 0 then
+            hazardReader.lastLivingEnemyAt = argument
+        elseif not hazardReader.noLivingEnemySince then
+            hazardReader.noLivingEnemySince = argument
+        end
+        if #enemies > 0 then
+            hazardReader.noLivingEnemySince = nil
+        end
         mobGroups = workspaceService:FindFirstChild("dungeonStarted")
         value2 = mobGroups ~= nil and mobGroups.Value == true
         if value2 then
@@ -33161,6 +33172,25 @@ components.hazardReader = function(context)
         if argument - hazardReader.lastEnemyScan > 0.5 then
             hazardReader.lastEnemyScan = argument
             pcall(helper44, argument)
+        end
+        -- r24: Clear cached, synthetic attacks once an encounter has ended.
+        -- The grace period protects against transient enemy-scan gaps and
+        -- prevents a still-active projectile from being ignored immediately.
+        -- Never clear physical wall geometry here.
+        if hazardReader.noLivingEnemySince
+            and argument - hazardReader.noLivingEnemySince > 2.0
+            and not hazardReader.clearedEmptyEncounter
+        then
+            hazardReader.clearedEmptyEncounter = true
+            for i = #hazardReader.zones, 1, -1 do
+                local zone = hazardReader.zones[i]
+                if zone and (zone.kind == "zone" or zone.hardPending or zone.telegraphed) then
+                    table.remove(hazardReader.zones, i)
+                end
+            end
+            hazardReader.boxGen = (hazardReader.boxGen or 0) + 1
+        elseif not hazardReader.noLivingEnemySince then
+            hazardReader.clearedEmptyEncounter = false
         end
         if hazardReader.hub then
             if argument - (hazardReader.hubAt or 0) > 20 then
@@ -53141,40 +53171,78 @@ components.movementCombat = function(context)
         end
         return total/(n+1), maxRisk, vyRisk(b,d/math.max(speed or 20,12))
     end
+    -- r25: choose a safe *route*, not merely a safe endpoint. Meteor evasions
+    -- preferentially run along the open corridor parallel to nearby floor beams.
     local function vyGate(a, destination, speed)
         if not vyActive() then return destination end
         vyRefresh()
         if #vyGuard.effects == 0 then return destination end
-        local current = vyRisk(a,0)
-        local avg, peak, ending = vyPathRisk(a,destination,speed)
+        local current = vyRisk(a, 0)
+        local _, peak = vyPathRisk(a, destination, speed)
         if peak == 0 then return destination end
-        -- If already exposed, choose the route that most rapidly decreases risk.
-        local best, bestScore, bestEnd
-        local dx, dz = destination.X-a.X, destination.Z-a.Z
-        local desired = math.atan2(dz,dx)
-        for ring=1,2 do
-            local distance = ring == 1 and 9 or 17
+        local bossPos
+        for _, enemy in ipairs(capturedContext[3].enemies or {}) do
+            if enemy.isBoss and enemy.humanoid and enemy.humanoid.Health > 0 and enemy.x and enemy.z then
+                bossPos = Vector3.new(enemy.x, a.Y, enemy.z)
+                break
+            end
+        end
+        local candidates = {}
+        local function addCandidate(point)
+            if point and (point-a).Magnitude > 2 then candidates[#candidates+1] = point end
+        end
+        -- Along-beam candidates keep the same lateral offset, rather than
+        -- cutting across an illuminated laser while escaping falling meteors.
+        for _, e in ipairs(vyGuard.effects) do
+            if e.kind == "stripe" or e.kind == "learned" then
+                local along = e.cf.RightVector
+                if e.size.Z > e.size.X then along = e.cf.LookVector end
+                along = Vector3.new(along.X,0,along.Z)
+                if along.Magnitude > 0.1 then
+                    along = along.Unit
+                    for _, dist in ipairs({10,18,26,36}) do
+                        addCandidate(a + along*dist)
+                        addCandidate(a - along*dist)
+                    end
+                end
+            end
+        end
+        -- Include cardinal and diagonal evasions; never select on endpoint alone.
+        for _, dist in ipairs({8,14,22,32}) do
             for i=0,15 do
                 local angle = i*math.pi/8
-                local candidate = Vector3.new(a.X+math.cos(angle)*distance,a.Y,
-                    a.Z+math.sin(angle)*distance)
-                local mean, worst, endRisk = vyPathRisk(a,candidate,speed)
-                local delta = math.abs(math.atan2(math.sin(angle-desired),math.cos(angle-desired)))
-                local score = mean*4 + endRisk*6 + worst*0.4 + delta*3
-                if current > 0 and endRisk < current then score -= 90 end
-                if (current == 0 and worst == 0 or current > 0 and endRisk < current)
-                    and (not context.BB or not context.BB.pathBlocked
-                        or not context.BB.pathBlocked(a,candidate,speed))
-                    and (not bestScore or score < bestScore) then
-                    best,bestScore,bestEnd = candidate,score,endRisk
+                addCandidate(a + Vector3.new(math.cos(angle)*dist,0,math.sin(angle)*dist))
+            end
+        end
+        local best, bestScore
+        local intended = Vector3.new(destination.X-a.X,0,destination.Z-a.Z)
+        for _, candidate in ipairs(candidates) do
+            local mean, worst, endRisk = vyPathRisk(a,candidate,speed)
+            local improves = current > 0 and endRisk < current
+            if (worst == 0 or improves) and
+                (not context.BB or not context.BB.pathBlocked or
+                    not context.BB.pathBlocked(a,candidate,speed)) then
+                local displacement = Vector3.new(candidate.X-a.X,0,candidate.Z-a.Z)
+                local deviation = intended.Magnitude > 0.1 and
+                    (1 - displacement.Unit:Dot(intended.Unit)) or 0
+                local bossPenalty = 0
+                if bossPos then
+                    local before = (Vector3.new(a.X,0,a.Z)-Vector3.new(bossPos.X,0,bossPos.Z)).Magnitude
+                    local after = (Vector3.new(candidate.X,0,candidate.Z)-Vector3.new(bossPos.X,0,bossPos.Z)).Magnitude
+                    bossPenalty = math.max(0,after-before)*1.8
+                end
+                local score = mean*5 + endRisk*8 + worst*2 + deviation*7
+                    + displacement.Magnitude*0.15 + bossPenalty
+                if improves then score -= 100 end
+                if not bestScore or score < bestScore then
+                    best,bestScore = candidate,score
                 end
             end
         end
         if best then return best end
-        -- No verified safe path: do not issue the known-dangerous command.
         if os.clock()-vyGuard.lastWarn > 1 then
             vyGuard.lastWarn=os.clock()
-            if context.logT then context.logT("[GS r13] blocked unsafe boss movement; hazards="..#vyGuard.effects) end
+            if context.logT then context.logT("[Vortex r25] blocked unsafe meteor/laser crossing") end
         end
         return nil
     end
@@ -79784,31 +79852,9 @@ components.movementCombat = function(context)
         logT("buff", 4, "Fight", "speed skill pressed")
         return true
     end
-    local sharedValue9 = {
-        "Desert Temple",
-        "Winter Outpost",
-        "Pirate Island",
-        "King's Castle",
-        "The Underworld",
-        "Samurai Palace",
-        "The Canals",
-        "Ghastly Harbor",
-        "Steampunk Sewers",
-        "Orbital Outpost",
-        "Volcanic Chambers",
-        "Aquatic Temple",
-        "Enchanted Forest",
-        "Northern Lands",
-        "Gilded Skies",
-        "Oni Dungeon",
-    }
+    local supportedDungeonRanks = { ["Northern Lands"] = 14, ["Gilded Skies"] = 15 }
     context.dungeonRank = function(argument)
-        for index, entry in ipairs(sharedValue9) do
-            if entry == argument then
-                return index
-            end
-        end
-        return nil
+        return supportedDungeonRanks[argument]
     end
     context.emptySetTick = function(emptyCharAt)
         local value = {}
@@ -120264,30 +120310,17 @@ components.partyQueue = function(context)
         return {
             on = false,
             accounts = {},
-            map = config.autoQueueMap or "Desert Temple",
+            map = config.autoQueueMap or "Gilded Skies",
             difficulty = config.autoQueueDifficulty or "Nightmare",
             waitMax = 120,
             replay = true,
             auto = true,
-            cap = "Steampunk Sewers",
+            cap = "Gilded Skies",
             hardest = "Northern Lands",
-            start = "Desert Temple",
+            start = "Gilded Skies",
         }
     end
     partyQueue.LEVELS = {
-        ["Desert Temple"] = { Easy = 1, Medium = 6, Hard = 12, Insane = 20, Nightmare = 27 },
-        ["Winter Outpost"] = { Easy = 33, Medium = 40, Hard = 45, Insane = 50, Nightmare = 55 },
-        ["Pirate Island"] = { Insane = 60, Nightmare = 65 },
-        ["King's Castle"] = { Insane = 70, Nightmare = 75 },
-        ["The Underworld"] = { Insane = 80, Nightmare = 85 },
-        ["Samurai Palace"] = { Insane = 90, Nightmare = 95 },
-        ["The Canals"] = { Insane = 100, Nightmare = 105 },
-        ["Ghastly Harbor"] = { Insane = 110, Nightmare = 115 },
-        ["Steampunk Sewers"] = { Insane = 120, Nightmare = 125 },
-        ["Orbital Outpost"] = { Insane = 140, Nightmare = 145 },
-        ["Volcanic Chambers"] = { Insane = 150, Nightmare = 155 },
-        ["Aquatic Temple"] = { Insane = 160, Nightmare = 165 },
-        ["Enchanted Forest"] = { Insane = 170, Nightmare = 175 },
         ["Northern Lands"] = { Insane = 180, Nightmare = 185 },
         ["Gilded Skies"] = { Insane = 190, Nightmare = 195 },
     }
@@ -123285,7 +123318,7 @@ components.partyQueue = function(context)
             end
             pcall(partyQueue.soloParty, {
                 auto = false,
-                map = config.autoQueueMap or "Desert Temple",
+                map = config.autoQueueMap or "Gilded Skies",
                 difficulty = config.autoQueueDifficulty or "Nightmare",
                 replay = config.autoQueueReplay ~= false,
             })
@@ -123390,23 +123423,11 @@ components.partyQueue = function(context)
             or valueObject2 ~= nil and valueObject2.Value == true
             or (helper7())
     end
+    -- r24: Only supported endgame dungeons are offered for queueing.
+    -- Keep internal dungeon rank tables intact: other combat systems depend on their indices.
     context.QUEUE_MAPS = {
-        "Desert Temple",
-        "Winter Outpost",
-        "Pirate Island",
-        "King's Castle",
-        "The Underworld",
-        "Samurai Palace",
-        "The Canals",
-        "Steampunk Sewers",
-        "Ghastly Harbor",
-        "Orbital Outpost",
-        "Volcanic Chambers",
-        "Enchanted Forest",
-        "Aquatic Temple",
-        "Northern Lands",
         "Gilded Skies",
-        "Pumpkin King",
+        "Northern Lands",
     }
     context.EVENT_DIFF = { ["Pumpkin King"] = "Nightmare" }
     context.isEvent = function()
@@ -126884,11 +126905,68 @@ components.voidsbaneV3 = function(context)
             local arenaB=state.passive and state.passive.glyph
             local maxRB=context.v3ArenaRadius()
             local stepB=math.max(16,(rt.speedNow or humanoid.WalkSpeed or 20)*1.6)
+            -- r26: evaluate both X/Z axes. Warning strips can be horizontal,
+            -- vertical or rotated; a destination alone is not enough.
+            local beamStrips={}
+            do
+                local effects=world:FindFirstChild('voidsbaneV3Effects')
+                if effects then
+                    local count=0
+                    for _,part in ipairs(effects:GetDescendants()) do
+                        count+=1
+                        if count>750 then break end
+                        if part:IsA('BasePart') and part.Transparency<0.9 then
+                            local c,sz=part.Color,part.Size
+                            local long,short=math.max(sz.X,sz.Z),math.min(sz.X,sz.Z)
+                            if c.R>0.55 and c.R>c.G*1.65 and c.R>c.B*1.4
+                                and long>10 and short<long*0.5
+                                and math.abs(part.Position.Y-root.Position.Y)<12 then
+                                local a=sz.X>=sz.Z and part.CFrame.RightVector or part.CFrame.LookVector
+                                local axis=Vector3.new(a.X,0,a.Z)
+                                if axis.Magnitude>0.2 then
+                                    axis=axis.Unit
+                                    beamStrips[#beamStrips+1]={center=part.Position,axis=axis,
+                                        half=long*0.5+3,width=short*0.5+3}
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            local function beamCrossing(dir)
+                local maxPenalty=0
+                local sideOffset=2.5
+                for _,strip in ipairs(beamStrips) do
+                    local side=Vector3.new(-strip.axis.Z,0,strip.axis.X)
+                    local rel=root.Position-strip.center
+                    local along0=Vector3.new(rel.X,0,rel.Z):Dot(strip.axis)
+                    local across0=Vector3.new(rel.X,0,rel.Z):Dot(side)
+                    local alongStep=dir:Dot(strip.axis)
+                    local acrossStep=dir:Dot(side)
+                    local near=math.max(0,math.abs(across0)-strip.width-sideOffset)
+                    local t=math.clamp(-across0/(math.abs(acrossStep)>0.001 and acrossStep or 0.001),0,stepB)
+                    local along=along0+alongStep*t
+                    local across=across0+acrossStep*t
+                    if math.abs(along)<strip.half and math.abs(across)<strip.width+sideOffset then
+                        -- Already standing inside a warning: allow escape, never reward staying.
+                        if math.abs(across0)>strip.width+sideOffset or
+                           math.abs(across0+acrossStep*stepB)<math.abs(across0) then
+                            maxPenalty=math.max(maxPenalty,1000)
+                        end
+                    end
+                    if near<4 and math.abs(along0)<strip.half and
+                        math.abs(across0+acrossStep*stepB)<math.abs(across0) then
+                        maxPenalty=math.max(maxPenalty,300)
+                    end
+                end
+                return maxPenalty
+            end
             local function breathClear(dir)
                 local p1=root.Position+dir*8
                 local p2=root.Position+dir*16
                 if context.v3DangerAt(p1.X,p1.Y,p1.Z,0.35)>=3 then return false end
                 if context.v3DangerAt(p2.X,p2.Y,p2.Z,0.8)>=3 then return false end
+                if beamCrossing(dir)>0 then return false end
                 -- A straight line held for a whole volley crossed the arena edge; keep the
                 -- committed heading inside the fighting area.
                 if vector(arenaB) then
@@ -126918,16 +126996,18 @@ components.voidsbaneV3 = function(context)
             if not hold or hold.Magnitude<0.1 or not breathClear(hold) then
                 local bestDir,bestScore=nil,math.huge
                 local bossB=context.v3BossPoint and context.v3BossPoint()
-                if vector(bossB) then
-                    local away=Vector3.new(root.Position.X-bossB.X,0,root.Position.Z-bossB.Z)
-                    if away.Magnitude>0.1 and breathClear(away.Unit) then bestDir,bestScore=away.Unit,-1 end
-                end
+                -- Prefer parallel-to-strip motion that maintains or closes boss distance.
                 if not bestDir then
                     for i=1,#radialDirections do
                         local dir=radialDirections[i]
                         if breathClear(dir) then
                             local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
                                 + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
+                            if vector(bossB) then
+                                local current=distance(root.Position.X,root.Position.Z,bossB)
+                                local future=distance(root.Position.X+dir.X*stepB,root.Position.Z+dir.Z*stepB,bossB)
+                                score=score+(future-current)*0.08
+                            end
                             if score<bestScore then bestScore,bestDir=score,dir end
                         end
                     end
@@ -126940,6 +127020,7 @@ components.voidsbaneV3 = function(context)
                         local dir=radialDirections[i]
                         local score=context.v3DangerAt(root.Position.X+dir.X*8,root.Position.Y,root.Position.Z+dir.Z*8,0.35)
                             + context.v3DangerAt(root.Position.X+dir.X*16,root.Position.Y,root.Position.Z+dir.Z*16,0.8)
+                        score=score+beamCrossing(dir)
                         if vector(arenaB) then
                             local far=root.Position+dir*stepB
                             if distance(far.X,far.Z,arenaB)>maxRB then score=score+1000 end
