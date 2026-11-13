@@ -170031,8 +170031,50 @@ logline(ok and "R19_INTERCEPT_REGISTERED" or ("R19_INTERCEPT_FAILED "..tostring(
         end
     end)
 end
+-- r28 diagnostics: visible startup state and first uncaught component failure.
+local __r28Stage = 'source entered'
+local function __r28Report(message, failed)
+    warn('[VORTEX r28 DIAG] ' .. tostring(message))
+    pcall(function()
+        local plr = game:GetService('Players').LocalPlayer
+        local pg = plr and plr:FindFirstChildOfClass('PlayerGui')
+        if not pg then return end
+        local gui = pg:FindFirstChild('VortexR28StartupDiagnostics')
+        if not gui then
+            gui = Instance.new('ScreenGui')
+            gui.Name = 'VortexR28StartupDiagnostics'
+            gui.ResetOnSpawn = false
+            gui.DisplayOrder = 999
+            gui.Parent = pg
+            local label = Instance.new('TextLabel')
+            label.Name = 'Status'
+            label.Size = UDim2.new(1, -24, 0, 88)
+            label.Position = UDim2.fromOffset(12, 16)
+            label.BackgroundColor3 = Color3.fromRGB(22, 12, 20)
+            label.TextColor3 = Color3.fromRGB(255, 235, 235)
+            label.TextWrapped = true
+            label.TextSize = 15
+            label.Font = Enum.Font.Code
+            label.Parent = gui
+        end
+        gui.Status.Text = 'VORTEX r28 DIAGNOSTICS\n' .. tostring(message)
+        if failed then gui.Status.TextColor3 = Color3.fromRGB(255, 80, 80) end
+    end)
+end
+local function __r28Init(name, callback)
+    __r28Stage = name
+    __r28Report('Starting: ' .. name, false)
+    local ok, err = xpcall(callback, function(e)
+        local trace = debug and debug.traceback and debug.traceback(tostring(e), 2) or tostring(e)
+        __r28Report('FAILED in ' .. name .. ': ' .. trace, true)
+        return trace
+    end)
+    if not ok then error('[VORTEX r28] ' .. name .. ': ' .. tostring(err), 0) end
+    __r28Report('Completed: ' .. name, false)
+end
 local context = {}
-components.coreSettings(context)
+__r28Init('coreSettings', function() components.coreSettings(context) end)
+__r28Report('Starting lobby equipment preflight', false)
 -- User-authorized ranged loadout: equip God Spear before lobby auto-queue starts.
 if game.PlaceId == 77649408247578 then
     local remotes = context.ReplicatedStorage:FindFirstChild('remotes')
@@ -170046,7 +170088,7 @@ if game.PlaceId == 77649408247578 then
                     local id=tonumber(tostring(key):match('(%d+)$'))
                     if id then
                         local success,result=pcall(equip.InvokeServer,equip,'ability',id,'q')
-                        getgenv().PelicanSpearPreflight={success=success,result=result,id=id}
+                        if type(getgenv)=='function' then getgenv().PelicanSpearPreflight={success=success,result=result,id=id} end
                         if success and result~=false then break end
                     end
                 end
@@ -170054,7 +170096,8 @@ if game.PlaceId == 77649408247578 then
         end
     end
 end
-context.loadConfig()
+__r28Report('Loading saved configuration', false)
+__r28Init('loadConfig', function() context.loadConfig() end)
 context.CFG.hitboxesMinimapOnly=true
 context.CFG.visuals=false
 context.CFG.minimap=true
@@ -170064,35 +170107,36 @@ context.CFG.minimapSmoothHz=15
 context.CFG.minimapRange=180
 context.CFG.gsWideCamera=true
 context.CFG.gsCameraDistance=125
-components.attackCatalog(context)
-components.gearProfiles(context)
-components.movementBoost(context)
-components.hazardReader(context)
-components.dangerGeometry(context)
-components.odinMechanics(context)
-components.bossPhases(context)
-components.bubbleBoss(context)
-components.voidsbaneV3(context)
-components.movementCombat(context)
-components.inventoryAutomation(context)
-components.partyQueue(context)
-components.raidAutomation(context)
+__r28Init('attackCatalog', function() components.attackCatalog(context) end)
+__r28Init('gearProfiles', function() components.gearProfiles(context) end)
+__r28Init('movementBoost', function() components.movementBoost(context) end)
+__r28Init('hazardReader', function() components.hazardReader(context) end)
+__r28Init('dangerGeometry', function() components.dangerGeometry(context) end)
+__r28Init('odinMechanics', function() components.odinMechanics(context) end)
+__r28Init('bossPhases', function() components.bossPhases(context) end)
+__r28Init('bubbleBoss', function() components.bubbleBoss(context) end)
+__r28Init('voidsbaneV3', function() components.voidsbaneV3(context) end)
+__r28Init('movementCombat', function() components.movementCombat(context) end)
+__r28Init('inventoryAutomation', function() components.inventoryAutomation(context) end)
+__r28Init('partyQueue', function() components.partyQueue(context) end)
+__r28Init('raidAutomation', function() components.raidAutomation(context) end)
 context.CFG.bonusVoteDelay = 1.5
-components.gsBonusSupport(context)
-components.menuLayout(context)
-components.nestedHazards(context)
-components.uiLibrary(context)
-components.drawing(context)
-components.walls(context)
-components.statisticsWebhooks(context)
-components.interfaceMainLoop(context)
-context.DungeonRecorder = components.dungeonRecorderButton(context)
-components.clientDiagnostics(context)
+__r28Init('gsBonusSupport', function() components.gsBonusSupport(context) end)
+__r28Init('menuLayout', function() components.menuLayout(context) end)
+__r28Init('nestedHazards', function() components.nestedHazards(context) end)
+__r28Init('uiLibrary', function() components.uiLibrary(context) end)
+__r28Init('drawing', function() components.drawing(context) end)
+__r28Init('walls', function() components.walls(context) end)
+__r28Init('statisticsWebhooks', function() components.statisticsWebhooks(context) end)
+__r28Init('interfaceMainLoop', function() components.interfaceMainLoop(context) end)
+__r28Init('dungeonRecorderButton', function() context.DungeonRecorder = components.dungeonRecorderButton(context) end)
+__r28Init('clientDiagnostics', function() components.clientDiagnostics(context) end)
 -- Apply after UI defaults/profile restoration as well.
 context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
 if context.MM and context.MM.setView then context.MM.setView('2d') end
+__r28Report('Main components completed; creating replacement GUI', false)
 -- VORTEX r23: replacement responsive interface; legacy UI disabled, gameplay retained.
 do
     local Players = game:GetService('Players')
@@ -170216,6 +170260,8 @@ do
     tabs['Auto Farm'].tab:Activate()
     tabs['Auto Farm'].page.Visible=true;tabs['Auto Farm'].tab.BackgroundColor3=C.accent;tabs['Auto Farm'].tab.TextColor3=C.white
     print('[VORTEX r28] Responsive GUI loaded')
+    local diag = pg:FindFirstChild('VortexR28StartupDiagnostics')
+    if diag then diag:Destroy() end
 end
 
 return context
