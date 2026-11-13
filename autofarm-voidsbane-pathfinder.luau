@@ -2,6 +2,7 @@
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
 -- Vortex UI r1: red/black palette, vortex ring, display font, glow, per-window scaling
 -- Voidsbane: Roblox PathfindingService for dodging + boss approach, plain humanoid walking inside gsV3PathSwitchDist.
+-- r15 nav: time-aware, monotone-escape pathing (see nav.* and the grid router in v3DodgeApply).
 -- Save as workspace/HarvardLabs/autofarm-working.luau so the teleport reload below loads this copy.
 -- Reload this installed copy after dungeon teleports and replay.
 do
@@ -126552,11 +126553,33 @@ components.voidsbaneV3 = function(context)
     local nav={rbx={busy=false,version=0,goal=nil,waypoints=nil,index=1,fresh=-math.huge,at=-math.huge,status='idle'}}
     context.v3Nav=nav
     state.nav=nav.rbx
+    -- r15 navigation. Same layering as r14 (walk -> Roblox path -> hazard grid), but every layer is
+    -- now time-aware and strict about attacks:
+    --  * a leg may climb OUT of an attack but never get deeper into one (r14 accepted any leg that was
+    --    no worse than the depth already under the character, so escapes could run along a zone)
+    --  * every sample is checked over an arrival window (latency + slower/faster than predicted),
+    --    not at one optimistic instant
+    --  * walking checks use a spherecast of the agent radius instead of a single ray
+    local NAV_TOL=0.2
+    function nav.latency()
+        local ping=tonumber(rt.pingS) or 0
+        return 0.08+math.clamp(ping*0.5,0,0.25)
+    end
     function nav.hazardAt(p,dt)
         local d=context.v3DangerAt(p.X,p.Y,p.Z,dt)
         local g=context.dangerAt(p.X,p.Y,p.Z,dt,nil,nil,nil,true)
         if g>=1 and d<4 then d=4 end
         return d
+    end
+    -- Worst danger at p over the window an arrival at time t could realistically land in.
+    function nav.hazardSpan(p,t)
+        local t0=t+nav.latency()
+        local worst=nav.hazardAt(p,t0)
+        local late=nav.hazardAt(p,t0*1.2+0.15)
+        if late>worst then worst=late end
+        local early=nav.hazardAt(p,math.max(0,t0*0.85-0.1))
+        if early>worst then worst=early end
+        return worst
     end
     function nav.rayParams()
         local rp=RaycastParams.new()
@@ -126574,8 +126597,11 @@ components.voidsbaneV3 = function(context)
         local delta=Vector3.new(to.X-from.X,0,to.Z-from.Z)
         if delta.Magnitude<0.5 then return false end
         local origin=from+Vector3.new(0,1.5,0)
-        for _=1,3 do
-            local hit=world:Raycast(origin,delta,rp)
+        local radius=tonumber(cfg.gsV3AgentRadius) or 2
+        for _=1,4 do
+            local hit
+            local okCast=pcall(function() hit=world:Spherecast(origin,radius,delta,rp) end)
+            if not okCast then hit=world:Raycast(origin,delta,rp) end
             if not hit then return false end
             local model=hit.Instance:FindFirstAncestorOfClass('Model')
             if model and model:FindFirstChildOfClass('Humanoid') then
@@ -126601,14 +126627,19 @@ components.voidsbaneV3 = function(context)
         end
         return true
     end
-    -- limit is the danger already under the character: a leg may not get worse than where we stand.
+    -- limit is the danger the character may start the leg in. The leg is allowed to get shallower,
+    -- never deeper: the ceiling drops to every lower reading and a later rise above it fails.
     function nav.lineSafe(from,to,speed,limit,t0)
         local len=Vector3.new(to.X-from.X,0,to.Z-from.Z).Magnitude
-        local steps=math.max(1,math.ceil(len/4))
+        local steps=math.max(1,math.ceil(len/2.5))
         t0=t0 or 0
+        speed=math.max(speed or 16,1)
+        local ceiling=math.max(0,limit or 0)
         for i=1,steps do
             local p=from:Lerp(to,i/steps)
-            if nav.hazardAt(p,t0+len*i/steps/speed)>limit+0.05 then return false end
+            local d=nav.hazardSpan(p,t0+len*i/steps/speed)
+            if d>ceiling+NAV_TOL then return false end
+            if d<ceiling then ceiling=d end
         end
         return true
     end
@@ -126618,12 +126649,15 @@ components.voidsbaneV3 = function(context)
         if not nav.floorOk(pos,goal,rp) then return false end
         return nav.lineSafe(pos,goal,speed,limit,0)
     end
-    -- Nearest clear cells of the hazard grid, scored by distance, edge margin and distance from the
-    -- boss ring. Returns up to five candidates, best first.
+    -- Clear cells of the hazard grid within 48 studs of pos (windowed, cost is evaluated lazily), scored
+    -- by distance, edge margin (5x5 neighbourhood) and distance from the boss ring. Best five, best first.
     function nav.safeSpots(pf,cell,pos,bossP,closeDist)
         local n,top=pf.n,{}
-        for iz=0,n-1 do
-            for ix=0,n-1 do
+        local reach=math.ceil(48/cell)
+        local cix=math.floor((pos.X-pf.origin.X)/cell+0.5)+pf.half
+        local ciz=math.floor((pos.Z-pf.origin.Z)/cell+0.5)+pf.half
+        for iz=math.max(0,ciz-reach),math.min(n-1,ciz+reach) do
+            for ix=math.max(0,cix-reach),math.min(n-1,cix+reach) do
                 local c=pf.cost[iz*n+ix]
                 if c and c<=0 then
                     local wx=pf.origin.X+(ix-pf.half)*cell
@@ -126631,12 +126665,14 @@ components.voidsbaneV3 = function(context)
                     local d=math.sqrt((wx-pos.X)^2+(wz-pos.Z)^2)
                     if d>=1.5 and d<=48 then
                         local score=d
-                        for dz=-1,1 do
-                            for dx=-1,1 do
+                        for dz=-2,2 do
+                            for dx=-2,2 do
                                 local nx,nz=ix+dx,iz+dz
                                 if nx>=0 and nz>=0 and nx<n and nz<n then
                                     local nc=pf.cost[nz*n+nx]
-                                    if nc and nc>0 then score+=2 end
+                                    if nc and nc>0 then
+                                        if math.abs(dx)<=1 and math.abs(dz)<=1 then score+=4 else score+=1.5 end
+                                    end
                                 end
                             end
                         end
@@ -126662,10 +126698,11 @@ components.voidsbaneV3 = function(context)
         for i=1,#top do out[i]=top[i].pos end
         return out
     end
+    -- A spot must stay clear for two seconds after arrival, not only at the moment we get there.
     function nav.spotOk(pos,spot,speed)
-        local t=Vector3.new(spot.X-pos.X,0,spot.Z-pos.Z).Magnitude/speed
-        for _,extra in ipairs({0,0.5,1.0}) do
-            if nav.hazardAt(spot,t+extra)>0.05 then return false end
+        local t=Vector3.new(spot.X-pos.X,0,spot.Z-pos.Z).Magnitude/math.max(speed or 16,1)
+        for _,extra in ipairs({0,0.6,1.2,2.0}) do
+            if nav.hazardSpan(spot,t+extra)>0.05 then return false end
         end
         local rp=nav.rayParams()
         local hit=world:Raycast(spot+Vector3.new(0,4,0),Vector3.new(0,-18,0),rp)
@@ -126704,12 +126741,13 @@ components.voidsbaneV3 = function(context)
     end
     -- Next waypoint of the cached Roblox path, or nil when there is none, it is stale, or the next
     -- legs would run through an attack (the caller then falls back to the hazard-aware grid route).
+    -- Looks gsV3PathLookahead seconds of travel ahead (default 2.2, r14 looked 1.4).
     function nav.follow(root,goal,speed,limit)
         local r=nav.rbx
         local wps=r.waypoints
         if not wps or not r.goal then return nil end
         local pos=root.Position
-        if Vector3.new(r.goal.X-goal.X,0,r.goal.Z-goal.Z).Magnitude>8 or os.clock()-r.fresh>8 then
+        if Vector3.new(r.goal.X-goal.X,0,r.goal.Z-goal.Z).Magnitude>8 or os.clock()-r.fresh>6 then
             nav.invalidate()
             return nil
         end
@@ -126718,18 +126756,20 @@ components.voidsbaneV3 = function(context)
         end
         local wp=wps[r.index]
         if not wp then nav.invalidate() return nil end
-        if Vector3.new(wp.Position.X-pos.X,0,wp.Position.Z-pos.Z).Magnitude>45 then nav.invalidate() return nil end
+        if Vector3.new(wp.Position.X-pos.X,0,wp.Position.Z-pos.Z).Magnitude>30 then nav.invalidate() return nil end
+        local look=tonumber(cfg.gsV3PathLookahead) or 2.2
         local from,travelled=pos,0
-        for i=r.index,math.min(#wps,r.index+2) do
+        for i=r.index,math.min(#wps,r.index+5) do
             local to=wps[i].Position
-            if not nav.lineSafe(from,to,speed,limit,travelled/speed) then return nil end
+            if not nav.lineSafe(from,to,speed,limit,travelled/math.max(speed,1)) then return nil end
             travelled+=Vector3.new(to.X-from.X,0,to.Z-from.Z).Magnitude
             from=to
-            if travelled>speed*1.4 then break end
+            if travelled>speed*look then break end
         end
         return wp
     end
     -- Returns direction, mode ('walk' | 'path' | 'grid'), jump.
+    -- gridRoute is called as gridRoute(pos,goal,speed,limit).
     function nav.step(root,goal,speed,limit,gridRoute)
         local pos=root.Position
         local dist=Vector3.new(goal.X-pos.X,0,goal.Z-pos.Z).Magnitude
@@ -126746,7 +126786,7 @@ components.voidsbaneV3 = function(context)
             if wp then return dirTo(wp.Position),'path',wp.Action==Enum.PathWaypointAction.Jump end
             nav.request(root,goal)
         end
-        local g=gridRoute and gridRoute(pos,goal)
+        local g=gridRoute and gridRoute(pos,goal,speed,limit)
         if g then return dirTo(g),'grid',false end
         return nil
     end
@@ -127001,8 +127041,16 @@ components.voidsbaneV3 = function(context)
             context.setState(state.retreating and 'VOIDSBANE V3: '..tostring(state.goalReason)
                 or 'VOIDSBANE V3: dodge '..tostring(state.dodgeReason or 'predicted attack'))
         end
-        -- Pathfinder: 4-stud grid over the arena, hazard cost refreshed at 4 Hz, A* on every
-        -- replan. The goal still comes from the attack logic; this only decides the route.
+        -- r15 grid router: 4-stud grid over the arena, A* on every replan. The goal still comes from
+        -- the attack logic; this only decides the route. Differences from r14:
+        --  * cell hazard is evaluated lazily and AT THE TIME the path would reach the cell
+        --    (arrival window incl. latency), not as a static union of three future instants
+        --  * a cell is passable only when clear (or no deeper than where we already stand);
+        --    r14 passed anything under depth 4, which is already inside the real hitbox (pad is 3)
+        --  * octile heuristic (r14's Manhattan overestimated diagonals), binary heap, no diagonal
+        --    squeezes between two blocked cells
+        --  * the result is string-pulled to the furthest cell with a clear line (<= 4 cells) so the
+        --    heading no longer cuts corners through the 2nd cell of the raw path
         local PF_CELL=4
         local function pfRefresh(origin, arenaR)
             local pf=state.pf
@@ -127011,29 +127059,56 @@ components.voidsbaneV3 = function(context)
             local stale=(not pf) or (not pf.cost) or pf.n~=n or (not pf.origin)
                 or (pf.origin-origin).Magnitude>10 or (now-(pf.at or 0))>0.25
             if not stale then return pf end
-            local cost={}
-            for iz=0,n-1 do
-                for ix=0,n-1 do
-                    local cx=origin.X+(ix-half)*PF_CELL
-                    local cz=origin.Z+(iz-half)*PF_CELL
-                    local c=0
-                    for _,t in ipairs({0.4,1.2,2.2}) do
-                        local d=context.v3DangerAt(cx,root.Position.Y,cz,t)
-                        if d>c then c=d end
-                    end
-                    cost[iz*n+ix]=c
-                end
+            local y=root.Position.Y
+            local snapshot=state.queryNow or world:GetServerTimeNow()
+            local function eval(cx,cz,off)
+                local saved=state.queryNow
+                state.queryNow=snapshot
+                local ok,d=pcall(nav.hazardAt,Vector3.new(cx,y,cz),off)
+                state.queryNow=saved
+                if ok and type(d)=='number' then return d end
+                return 4
             end
-            local fresh={at=now,n=n,half=half,origin=origin,cost=cost}
+            local fresh={at=now,n=n,half=half,origin=origin,timed={},eval=eval}
+            fresh.cost=setmetatable({},{__index=function(t,idx)
+                if type(idx)~='number' or idx<0 or idx>=n*n then return nil end
+                local ix,iz=idx%n,math.floor(idx/n)
+                local cx=origin.X+(ix-half)*PF_CELL
+                local cz=origin.Z+(iz-half)*PF_CELL
+                local c=0
+                for _,tt in ipairs({0.4,1.2,2.2}) do
+                    local d=eval(cx,cz,tt)
+                    if d>c then c=d end
+                end
+                rawset(t,idx,c)
+                return c
+            end})
             state.pf=fresh
             return fresh
         end
-        local function pfCell(origin, half, world)
-            local ix=math.floor((world.X-origin.X)/PF_CELL+0.5)+half
-            local iz=math.floor((world.Z-origin.Z)/PF_CELL+0.5)+half
+        local function pfCell(origin, half, p)
+            local ix=math.floor((p.X-origin.X)/PF_CELL+0.5)+half
+            local iz=math.floor((p.Z-origin.Z)/PF_CELL+0.5)+half
             return ix,iz
         end
-        local function pfRoute(from, to)
+        -- Hazard of one cell for an arrival ta seconds from now; memoised per 0.2 s bucket.
+        local function pfHazard(pf, idx, ta)
+            local key=idx*64+math.min(63,math.floor(math.max(0,ta)/0.2))
+            local v=pf.timed[key]
+            if v then return v end
+            local ix,iz=idx%pf.n,math.floor(idx/pf.n)
+            local cx=pf.origin.X+(ix-pf.half)*PF_CELL
+            local cz=pf.origin.Z+(iz-pf.half)*PF_CELL
+            local t0=ta+nav.latency()
+            v=pf.eval(cx,cz,t0)
+            local late=pf.eval(cx,cz,t0*1.2+0.15)
+            if late>v then v=late end
+            local early=pf.eval(cx,cz,math.max(0,t0*0.85-0.1))
+            if early>v then v=early end
+            pf.timed[key]=v
+            return v
+        end
+        local function pfRoute(from, to, spd, lim)
             local origin=state.passive and state.passive.glyph
             if not vector(origin) then return nil end
             local pf=pfRefresh(origin, context.v3ArenaRadius())
@@ -127042,42 +127117,79 @@ components.voidsbaneV3 = function(context)
             local sx,sz=pfCell(origin,pf.half,from)
             local tx,tz=pfCell(origin,pf.half,to)
             if sx<0 or sz<0 or sx>=n or sz>=n or tx<0 or tz<0 or tz>=n or tx>=n then return nil end
-            local start=sz*n+sx
-            local goal=tz*n+tx
-            local open={[start]=true}
-            local g={[start]=0}
-            local f={[start]=(math.abs(tx-sx)+math.abs(tz-sz))}
-            local came={}
-            local closed={}
-            local best=start
-            local budget=0
-            while next(open) and budget<900 do
-                budget=budget+1
-                local current,bestF=nil,math.huge
-                for cell in pairs(open) do
-                    local fc=f[cell] or math.huge
-                    if fc<bestF then bestF,current=fc,cell end
+            local start,goal=sz*n+sx,tz*n+tx
+            if start==goal then return nil end
+            local pace=math.max(8,tonumber(spd) or (rt.speedNow or humanoid.WalkSpeed or 16))
+            -- never walk deeper into an attack than where the route starts
+            local ceilHz=math.max(0.05,pfHazard(pf,start,0),tonumber(lim) or 0)
+            local heapI,heapF,hn={},{},0
+            local function push(idx,fv)
+                hn+=1
+                local i=hn
+                while i>1 do
+                    local p=math.floor(i/2)
+                    if heapF[p]<=fv then break end
+                    heapI[i],heapF[i]=heapI[p],heapF[p]
+                    i=p
                 end
-                if not current then break end
-                if current==goal then best=goal break end
-                open[current]=nil
-                closed[current]=true
-                local cx,cz=current%n,math.floor(current/n)
-                for dz=-1,1 do
-                    for dx=-1,1 do
-                        if dx~=0 or dz~=0 then
-                            local nx,nz=cx+dx,cz+dz
-                            if nx>=0 and nz>=0 and nx<n and nz<n then
-                                local idx=nz*n+nx
-                                local hz=pf.cost[idx] or 99
-                                if hz<4 and not closed[idx] then
-                                    local step=(dx~=0 and dz~=0) and 1.414 or 1
-                                    local ng=(g[current] or 0)+step+hz*2.2
-                                    if ng<(g[idx] or math.huge) then
-                                        came[idx]=current
-                                        g[idx]=ng
-                                        f[idx]=ng+(math.abs(tx-nx)+math.abs(tz-nz))
-                                        open[idx]=true
+                heapI[i],heapF[i]=idx,fv
+            end
+            local function pop()
+                local topI=heapI[1]
+                local lastI,lastF=heapI[hn],heapF[hn]
+                heapI[hn],heapF[hn]=nil,nil
+                hn-=1
+                if hn>0 then
+                    local i=1
+                    while true do
+                        local l=i*2
+                        if l>hn then break end
+                        local r=l+1
+                        local c=(r<=hn and heapF[r]<heapF[l]) and r or l
+                        if heapF[c]>=lastF then break end
+                        heapI[i],heapF[i]=heapI[c],heapF[c]
+                        i=c
+                    end
+                    heapI[i],heapF[i]=lastI,lastF
+                end
+                return topI
+            end
+            local g,len,came,closed={[start]=0},{[start]=0},{},{}
+            push(start,0)
+            local found,budget=false,0
+            while hn>0 and budget<1400 do
+                local current=pop()
+                if not closed[current] then
+                    budget+=1
+                    if current==goal then found=true break end
+                    closed[current]=true
+                    local cx,cz=current%n,math.floor(current/n)
+                    for dz=-1,1 do
+                        for dx=-1,1 do
+                            if dx~=0 or dz~=0 then
+                                local nx,nz=cx+dx,cz+dz
+                                if nx>=0 and nz>=0 and nx<n and nz<n then
+                                    local idx=nz*n+nx
+                                    if not closed[idx] then
+                                        local diag=dx~=0 and dz~=0
+                                        local stepCells=diag and 1.414 or 1
+                                        local stepLen=stepCells*PF_CELL
+                                        local ta=(len[current]+stepLen)/pace
+                                        local hz=pfHazard(pf,idx,ta)
+                                        local ok=hz<=ceilHz
+                                        if ok and diag then
+                                            ok=pfHazard(pf,cz*n+nx,ta)<=ceilHz and pfHazard(pf,nz*n+cx,ta)<=ceilHz
+                                        end
+                                        if ok then
+                                            local ng=g[current]+stepCells+hz*2+hz*hz*0.5
+                                            if ng<(g[idx] or math.huge) then
+                                                g[idx]=ng
+                                                len[idx]=len[current]+stepLen
+                                                came[idx]=current
+                                                local ddx,ddz=math.abs(tx-nx),math.abs(tz-nz)
+                                                push(idx,ng+math.max(ddx,ddz)+0.414*math.min(ddx,ddz))
+                                            end
+                                        end
                                     end
                                 end
                             end
@@ -127085,19 +127197,35 @@ components.voidsbaneV3 = function(context)
                     end
                 end
             end
-            if best~=goal and not came[goal] then return nil end
-            local node=goal
-            local path={}
-            local guard=0
-            while node and node~=start and guard<400 do
+            if not found then return nil end
+            local path,node,guard={},goal,0
+            while node and node~=start and guard<600 do
                 table.insert(path,1,node)
                 node=came[node]
-                guard=guard+1
+                guard+=1
             end
             if #path==0 then return nil end
-            local pick=path[math.min(#path,2)]
-            local px,pz=pick%n,math.floor(pick/n)
-            return Vector3.new(origin.X+(px-pf.half)*PF_CELL,from.Y,origin.Z+(pz-pf.half)*PF_CELL)
+            -- String-pull: furthest of the first four cells reachable in a straight, clear line.
+            local function cellPos(idx)
+                return Vector3.new(pf.origin.X+(idx%n-pf.half)*PF_CELL,from.Y,pf.origin.Z+(math.floor(idx/n)-pf.half)*PF_CELL)
+            end
+            local pick=1
+            for k=math.min(#path,4),2,-1 do
+                local tp=cellPos(path[k])
+                local span=Vector3.new(tp.X-from.X,0,tp.Z-from.Z).Magnitude
+                local samples=math.max(1,math.ceil(span/2))
+                local clear=true
+                for s=1,samples do
+                    local p=from:Lerp(tp,s/samples)
+                    local ix,iz=pfCell(origin,pf.half,p)
+                    if ix<0 or iz<0 or ix>=n or iz>=n or pfHazard(pf,iz*n+ix,span*s/samples/pace)>ceilHz then
+                        clear=false
+                        break
+                    end
+                end
+                if clear then pick=k break end
+            end
+            return cellPos(path[pick])
         end
         if goalReason~=state.goalReason then state.checkedAt=-math.huge end
         if now-(state.checkedAt or 0)<0.08 then
@@ -127327,7 +127455,7 @@ components.voidsbaneV3 = function(context)
                         ap={boss=bossA,spot=Vector3.new(spot.X,pos.Y,spot.Z)}
                         state.approach=ap
                     end
-                    local dirA,modeA,jumpA=navA.step(root,ap.spot,speed,0,function(from,to) return pfRoute(from,to) end)
+                    local dirA,modeA,jumpA=navA.step(root,ap.spot,speed,0,function(from,to,spd,lim) return pfRoute(from,to,spd,lim) end)
                     if dirA and cost(dirA)<=0 and routeSafe(dirA) then
                         state.heading,state.headingActive=dirA,true
                         state.navMode=modeA
@@ -127453,7 +127581,10 @@ components.voidsbaneV3 = function(context)
         if (retreatGoal or stopped>0) and cfg.gsV3Pathfinder~=false and not holdingGoal and context.v3Nav then
             local navD=context.v3Nav
             local routeTarget=retreatGoal
-            local startDanger=math.max(0,(context.v3DangerAt(pos.X,pos.Y,pos.Z,0)))
+            local startDanger=0
+            for _,tStart in ipairs({0,0.3,0.8}) do
+                startDanger=math.max(startDanger,(context.v3DangerAt(pos.X,pos.Y,pos.Z,tStart)))
+            end
             if not vector(routeTarget) then
                 local centreD=state.passive and state.passive.glyph
                 if vector(centreD) then
@@ -127471,11 +127602,18 @@ components.voidsbaneV3 = function(context)
                 end
             end
             if vector(routeTarget) then
-                local dirN,modeN,jumpN=navD.step(root,routeTarget,speed,startDanger,function(from,to) return pfRoute(from,to) end)
-                if dirN and dirN.Magnitude>0.01 then
-                    chosen=dirN
-                    state.navMode=modeN
-                    if jumpN then humanoid.Jump=true end
+                local dirN,modeN,jumpN=navD.step(root,routeTarget,speed,startDanger,function(from,to,spd,lim) return pfRoute(from,to,spd,lim) end)
+                -- r15: a route only replaces the cost-field heading when its geometry is walkable and it is
+                -- at least as safe over the whole horizon. r14 let any path leg override a safer heading.
+                if dirN and dirN.Magnitude>0.01 and routeSafe(dirN) then
+                    local baseline=stopped
+                    if chosen and chosen.Magnitude>0.01 then baseline=cost(chosen) end
+                    local candidate=cost(dirN)
+                    if candidate<=0 or candidate<=baseline+0.1 then
+                        chosen=dirN
+                        state.navMode=modeN
+                        if jumpN then humanoid.Jump=true end
+                    end
                 end
             end
         end
