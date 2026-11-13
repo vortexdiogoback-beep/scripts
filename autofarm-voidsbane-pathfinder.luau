@@ -1,9 +1,9 @@
--- Roblox Luau | Dungeon Quest Reborn autofarm | Voidsbane patch r14
+-- VORTEX AUTO FARM r21 | visible UI refresh + reload diagnostics
 -- merge r1: voidsbaneV3 gained a live hazard layer + wiki glyph rule (cfg.gsV3Visual / cfg.gsV3GlyphMode)
 -- Vortex UI r1: red/black palette, vortex ring, display font, glow, per-window scaling
 -- Voidsbane: Roblox PathfindingService for dodging + boss approach, plain humanoid walking inside gsV3PathSwitchDist.
 -- r15 nav: time-aware, monotone-escape pathing (see nav.* and the grid router in v3DodgeApply).
--- Save as workspace/HarvardLabs/autofarm-working.luau so the teleport reload below loads this copy.
+-- IMPORTANT: install this r21 file at HarvardLabs/autofarm-working.luau for teleport persistence.
 -- Reload this installed copy after dungeon teleports and replay.
 do
     local env = type(getgenv) == 'function' and getgenv() or _G
@@ -25,6 +25,7 @@ end
     ==============================================================
 --]]
 
+warn("[VORTEX AUTO FARM r21] Loaded. If the UI does not show r21, an older script is running.")
 local players = game:GetService("Players")
 local player = players.LocalPlayer
 while not player do
@@ -128844,34 +128845,34 @@ components.uiLibrary = function(context)
     theme.TextOnAccent = Color3.fromHex("ffffff")
     theme.StatusBad = Color3.fromHex("ff8a3d")
     theme.StatusGood = Color3.fromHex("2FBF71")
-    theme.SurfaceHeader = Color3.fromHex("110d12")
-    theme.SurfaceElement = Color3.fromHex("20151b")
-    theme.SurfaceHover = Color3.fromHex("352029")
+    theme.SurfaceHeader = Color3.fromHex("09090D")
+    theme.SurfaceElement = Color3.fromHex("19151B")
+    theme.SurfaceHover = Color3.fromHex("35202A")
     theme.SurfaceField = Color3.fromHex("0f0709")
-    theme.SurfaceSection = Color3.fromHex("190c10")
+    theme.SurfaceSection = Color3.fromHex("151017")
     theme.SurfaceWell = Color3.fromHex("0d0608")
     theme.SurfaceChip = Color3.fromHex("0c0507")
     theme.Hairline = Color3.fromHex("3a1a20")
-    theme.BodyTop = Color3.fromHex("160a0e")
-    theme.BodyMid = Color3.fromHex("0f0709")
-    theme.BodyBot = Color3.fromHex("0a0406")
+    theme.BodyTop = Color3.fromHex("100B12")
+    theme.BodyMid = Color3.fromHex("0B090E")
+    theme.BodyBot = Color3.fromHex("08070B")
     theme.BodyTopA = 0
     theme.BodyMidA = 0
     theme.BodyBotA = 0
     theme.SweepSpeed = 0.3
-    theme.AccentA = Color3.fromHex("a1101f")
-    theme.AccentMid = Color3.fromHex("ed1c3b")
-    theme.AccentB = Color3.fromHex("ff4d5e")
+    theme.AccentA = Color3.fromHex("B40E2A")
+    theme.AccentMid = Color3.fromHex("FF174B")
+    theme.AccentB = Color3.fromHex("FF667B")
     theme.AccentDark = Color3.fromHex("5e0a14")
     theme.RadiusSm = 7
     theme.RadiusMd = 13
-    theme.RadiusLg = 20
+    theme.RadiusLg = 22
     theme.GapSm = 6
     theme.GapMd = 8
-    theme.GapLg = 12
+    theme.GapLg = 14
     theme.GapXl = 14
-    theme.RowH = context.COMPACT and 50 or 36
-    theme.HeaderH = context.COMPACT and 46 or 42
+    theme.RowH = context.COMPACT and 56 or 42
+    theme.HeaderH = context.COMPACT and 56 or 52
     local fontFamilies, sharedValue =
         {
             sans = "rbxasset://fonts/families/Montserrat.json",
@@ -128895,7 +128896,7 @@ components.uiLibrary = function(context)
     end
     local sharedValue2 = {}
     sharedValue2.windowTitle =
-        { family = "display", weight = Enum.FontWeight.SemiBold, size = 15, color = "TextPrimary" }
+        { family = "display", weight = Enum.FontWeight.SemiBold, size = 16, color = "TextPrimary" }
     sharedValue2.windowChip =
         { family = "display", weight = Enum.FontWeight.Bold, size = 11, color = "TextPrimary" }
     sharedValue2.rowLabel =
@@ -131070,7 +131071,7 @@ components.uiLibrary = function(context)
             helper = vortexRing(header, 20)
         end
         accentGradient(helper, 45)
-        helper = label(header, argument.title or "Window", "windowTitle", 2)
+        helper = label(header, "VORTEX r21  /  " .. tostring(argument.title or "Window"), "windowTitle", 2)
         helper.ZIndex = 4
         flexFill(helper, 58 + (argument.info and 32 or 0))
         local value5 = false
@@ -145233,7 +145234,7 @@ components.statisticsWebhooks = function(context)
             },
             { name = "Session" }
         value3.value, value3.inline =
-            ("%d Rodin clear%s, %d failed"):format(
+            ("%d bonus boss clear%s, %d failed"):format(
                 webhooks.rodinClears or 0,
                 (webhooks.rodinClears or 0) == 1 and "" or "s",
                 webhooks.rodinFails
@@ -145399,7 +145400,7 @@ components.statisticsWebhooks = function(context)
                     helper32("Bag", ("%d/%d"):format(bag, helper21()))
                 end
             end
-            helper32("Session", ("%d Rodin clear%s"):format(clears, clears == 1 and "" or "s"))
+            helper32("Session", ("%d bonus boss clear%s"):format(clears, clears == 1 and "" or "s"))
             helper32("Boss", webhooks.bonusBossName() .. "  •  Bonus encounter", false)
             helper32("Outcome", "**VICTORY**  •  Bonus boss defeated", false)
             if argument then
