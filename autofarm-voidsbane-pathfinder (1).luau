@@ -124905,6 +124905,10 @@ components.voidsbaneV3 = function(context)
             -- Requiring one silently disabled the whole rune/glyph mechanic.
             state.rune={value=p,rate=a,at=number(b) and b or now,max=d}
         end
+        -- r35: raw gauge kept in every glyph mode, used only as the glyph-white fallback.
+        if event=='RuneSync' and number(p) and number(a) then
+            state.runeRaw={value=p,rate=a,at=number(b) and b or now,max=d}
+        end
         if event == "Prepare" or event == "BossDefeated" then
             if event=='Prepare' then state.deaths=0;state.attempt={startedAt=now,status='running',job=game.JobId} end
             if event=='BossDefeated' and state.attempt then
@@ -124917,6 +124921,7 @@ components.voidsbaneV3 = function(context)
             state.breath, state.melee, state.meteor = nil, nil, nil
             state.meteorFollowup=nil
             state.passive,state.rune,state.refilling=nil,nil,nil
+            state.runeRaw=nil
             visual.glyphBase,state.lastOnGlyph=nil,nil
             state.runeNuke=nil
             state.lastKind=nil
@@ -125047,6 +125052,7 @@ components.voidsbaneV3 = function(context)
             -- stale glyph keeps pulling the character while it farms normal rooms.
             state.passive=nil
             state.rune=nil
+            state.runeRaw=nil
             state.runeNuke=nil
             state.breath=nil
             state.lastKind=nil
@@ -125324,6 +125330,8 @@ components.voidsbaneV3 = function(context)
                 local w=sum/n
                 visual.glyphW=w
                 visual.glyphBase=visual.glyphBase and math.min(visual.glyphBase,w) or w
+            else
+                visual.glyphW=nil
             end
             local ok,piv=pcall(function() return gg:IsA('Model') and gg:GetPivot().Position or gg.Position end)
             if ok and vector(piv) then visual.glyphPos=piv end
@@ -125446,8 +125454,21 @@ components.voidsbaneV3 = function(context)
     local function glyphWhite()
         refreshVisual()
         local w,base=visual.glyphW,visual.glyphBase
-        if not w or not base then return 0 end
-        return math.clamp((w-base)/math.max(0.2,0.9-base),0,1.2)
+        local seen=0
+        if w and base then
+            seen=math.clamp((w-base)/math.max(0.2,0.9-base),0,1.2)
+        end
+        -- r35: anti-lag / texture-stripped clients never see the colour change. An emptying
+        -- server gauge means the glyph is about to turn white, so use it when it is low.
+        local raw=state.runeRaw
+        if raw and state.passive and number(raw.value) and number(raw.rate) then
+            local cap=(number(raw.max) and raw.max>0) and raw.max or 45
+            local at=number(raw.at) and raw.at or world:GetServerTimeNow()
+            local v=math.clamp(raw.value+raw.rate*(world:GetServerTimeNow()-at),0,cap)
+            local frac=v/cap
+            if frac<0.4 then seen=math.max(seen,math.clamp(1-frac,0,1.2)) end
+        end
+        return seen
     end
     context.v3GlyphWhite=glyphWhite
     visual.barHot=function(center)
