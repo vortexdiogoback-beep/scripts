@@ -124849,6 +124849,24 @@ components.voidsbaneV3 = function(context)
     if type(getgenv)=='function' then getgenv().PelicanContext=context end
     local function vector(v) return typeof(v) == "Vector3" end
     local function number(v) return type(v) == "number" and v == v and math.abs(v) < 1e12 end
+    -- r37: below 60% health one more 890M hit is lethal, so every hazard margin grows by cfg.gsV3LowHpPad (default 1.5, 0 = off).
+    local padCache={at=-1,val=3}
+    local function padNow()
+        local clock=os.clock()
+        if clock-padCache.at<0.1 then return padCache.val end
+        padCache.at=clock
+        local base=tonumber(cfg.gsV3Pad) or 3
+        local extra=tonumber(cfg.gsV3LowHpPad)
+        if extra==nil then extra=1.5 end
+        local val=base
+        if extra>0 then
+            local ch=context.LocalPlayer and context.LocalPlayer.Character
+            local hum=ch and ch:FindFirstChildOfClass('Humanoid')
+            if hum and hum.MaxHealth>0 and hum.Health>0 and hum.Health/hum.MaxHealth<0.6 then val=base+extra end
+        end
+        padCache.val=val
+        return val
+    end
     local function add(kind, plan, expires)
         if not number(expires) then return end
         local c=plan.cfg
@@ -125338,7 +125356,7 @@ components.voidsbaneV3 = function(context)
         else
             visual.glyphW=nil
         end
-        local pad=tonumber(cfg.gsV3Pad) or 3
+        local pad=padNow()
         local purpleSafe=tonumber(cfg.gsV3PurpleSafe) or 2.4
         local greenSafe=tonumber(cfg.gsV3GreenSafe) or 2.0
         local count=0
@@ -125562,7 +125580,10 @@ components.voidsbaneV3 = function(context)
     local function safeNear(centre,pos)
         local speed=math.max(16,rt.speedNow or 20)
         local best,bestScore=nil,math.huge
-        for _,r in ipairs({0,5,9,14}) do
+        -- r37: candidates stay inside the glyph. The old 9 and 14 rings sat on or past its rim, so during
+        -- the whirls the farm parked at the edge and the rune kept whitening.
+        local glyphReach=tonumber(cfg.gsV3GlyphRadius) or 9
+        for _,r in ipairs({0,math.max(2,glyphReach*0.33),math.max(3,glyphReach*0.6)}) do
             local n=(r==0) and 1 or 8
             for i=0,n-1 do
                 local ang=i*2*math.pi/n
@@ -125596,7 +125617,7 @@ components.voidsbaneV3 = function(context)
             end
         end
         if cfg.gsV3Dodge ~= false and cfg.gsV3Visual ~= false then
-            local vd,vn=visualDepth(x,y,z,offset,tonumber(cfg.gsV3Pad) or 3)
+            local vd,vn=visualDepth(x,y,z,offset,padNow())
             if vd>best then best,name=vd,vn end
         end
         if cfg.gsV3Dodge == false or #state.plans==0 then return best,name end
@@ -125604,7 +125625,7 @@ components.voidsbaneV3 = function(context)
             local h=state.plans[i]
             if h.expires<now then table.remove(state.plans,i)
             else
-                local d=depth(h,x,y,z,now+math.max(0,offset or 0),tonumber(cfg.gsV3Pad) or 3)
+                local d=depth(h,x,y,z,now+math.max(0,offset or 0),padNow())
                 if d>best then best,name=d,h.kind end
             end
         end
@@ -125616,7 +125637,7 @@ components.voidsbaneV3 = function(context)
         local time=(state.queryNow or world:GetServerTimeNow())+math.max(0,offset or 0)
         for _,h in ipairs(state.plans) do
             if h.expires>=time and (not gapsOnly or h.kind=='Bars' or h.kind=='XSpin') then
-                local d=depth(h,point.X,point.Y,point.Z,time,influence+(tonumber(cfg.gsV3Pad) or 3))
+                local d=depth(h,point.X,point.Y,point.Z,time,influence+(padNow()))
                 if d>0 then
                     local clearance=math.clamp(influence-d,0,influence)
                     nearest=math.min(nearest,clearance);total+=clearance/influence;count+=1
@@ -125625,7 +125646,7 @@ components.voidsbaneV3 = function(context)
             end
         end
         if cfg.gsV3Visual ~= false and cfg.gsV3Dodge ~= false then
-            local vd=visualDepth(point.X,point.Y,point.Z,math.max(0,offset or 0),influence+(tonumber(cfg.gsV3Pad) or 3),gapsOnly)
+            local vd=visualDepth(point.X,point.Y,point.Z,math.max(0,offset or 0),influence+(padNow()),gapsOnly)
             if vd>0 then
                 local clearance=math.clamp(influence-vd,0,influence)
                 nearest=math.min(nearest,clearance);total+=clearance/influence;count+=1
@@ -126797,7 +126818,7 @@ components.voidsbaneV3 = function(context)
         if not bestAngle then return nil end
         local turn=(bestAngle-here+math.pi)%(2*math.pi)-math.pi
         local half=(tonumber(timingBest and timingBest.doorHalfWidth) or 9)-
-            (tonumber(cfg.gsV3Pad) or 3)-2
+            (padNow())-2
         local tolerance=math.max(0.025,half/math.max(radius,8))
         if math.abs(turn)<=tolerance then return nil end
         local travel=math.clamp(turn,-10/math.max(radius,10),10/math.max(radius,10))
@@ -170274,6 +170295,8 @@ context.CFG.minimapSmoothHz=15
 context.CFG.minimapRange=180
 context.CFG.gsWideCamera=true
 context.CFG.gsCameraDistance=125
+-- r36: built-in low-lag block off (shadows, bloom/sunrays/DoF, QualityLevel2). Read in components.voidsbaneV3.
+context.CFG.gsLowLag=false
 do
     __vortexStage('attackCatalog starting')
     local ok,err=pcall(components.attackCatalog,context)
