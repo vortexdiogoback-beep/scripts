@@ -125704,6 +125704,15 @@ components.voidsbaneV3 = function(context)
         end)
         pcall(function() UserSettings():GetService('UserGameSettings').SavedQualityLevel=Enum.SavedQualitySetting.QualityLevel2 end)
     end
+    if typeof(world)=='Instance' and cfg.gsLowLag==false then
+        -- r39: older builds saved QualityLevel2 into the Roblox settings and never undid it. Put it back to Automatic.
+        pcall(function()
+            local saved=UserSettings():GetService('UserGameSettings')
+            if saved.SavedQualityLevel==Enum.SavedQualitySetting.QualityLevel2 then
+                saved.SavedQualityLevel=Enum.SavedQualitySetting.Automatic
+            end
+        end)
+    end
     -- Briefly retain a safe route when two planners request opposite directions.
     -- Stops, stun, mechanic transitions and unsafe old paths always bypass this hold.
     local motion={}
@@ -126778,6 +126787,8 @@ components.voidsbaneV3 = function(context)
     -- r34: identify the NEAREST imminent superheated ring, not all rings at once.
     context.v3ShockwaveTarget=function(pos,now)
         local ringBest,originBest,timingBest,etaBest=nil,nil,nil,math.huge
+        -- r38: wiki: reposition while the lasers are purple. The old 1.9s window left too little time to cross the lane.
+        local shockLead=tonumber(cfg.gsV3ShockLead) or 3.6
         for _,h in ipairs(state.plans) do
             if h.kind=='Lance' and h.expires>now and h.p and vector(h.p.origin) then
                 local radius=math.max(6,distance(pos.X,pos.Z,h.p.origin))
@@ -126788,12 +126799,12 @@ components.voidsbaneV3 = function(context)
                             or tonumber(h.p.timing and h.p.timing.ringLife) or 3.3
                         local released=ring.stand and h.p.releaseAt and now>=h.p.releaseAt
                             +(tonumber(h.p.timing.standFade) or 0.8)
-                        if not released and elapsed<life and elapsed>-1.9 then
+                        if not released and elapsed<life and elapsed>-shockLead then
                             local impactAt=h.p.t0+ring.launch+0.6*(math.exp(radius/52)-1)
                             local eta=impactAt-now
                             -- A wave already moving past the player is not a reason
                             -- to abandon a new meteor/beam dodge.
-                            if eta>-0.22 and eta<3.8 and eta<etaBest then
+                            if eta>-0.22 and eta<shockLead+2.6 and eta<etaBest then
                                 ringBest,originBest,timingBest,etaBest=ring,h.p.origin,h.p.timing,eta
                             end
                         end
@@ -126812,13 +126823,19 @@ components.voidsbaneV3 = function(context)
                 local delta=(opening-here+math.pi)%(2*math.pi)-math.pi
                 local score=math.abs(delta)
                 if bossAngle then score+=math.abs((opening-bossAngle+math.pi)%(2*math.pi)-math.pi)*0.07 end
+                -- r38: lasers share this phase; a gap with a yellow bar in it is no gap.
+                local px,pz=originBest.X+radius*math.cos(opening),originBest.Z+radius*math.sin(opening)
+                local travelT=math.abs(delta)*radius/math.max(16,rt.speedNow or 20)
+                local laneDanger=math.max((context.v3DangerAt(px,pos.Y,pz,travelT)),
+                    (context.v3DangerAt(px,pos.Y,pz,math.max(travelT,etaBest))))
+                score+=math.max(0,laneDanger)*0.25
                 if score<bestDelta then bestAngle,bestDelta=opening,score end
             end
         end
         if not bestAngle then return nil end
         local turn=(bestAngle-here+math.pi)%(2*math.pi)-math.pi
-        local half=(tonumber(timingBest and timingBest.doorHalfWidth) or 9)-
-            (padNow())-2
+        local half=math.max(2,(tonumber(timingBest and timingBest.doorHalfWidth) or 9)-
+            (padNow())-2)
         local tolerance=math.max(0.025,half/math.max(radius,8))
         if math.abs(turn)<=tolerance then return nil end
         local travel=math.clamp(turn,-10/math.max(radius,10),10/math.max(radius,10))
