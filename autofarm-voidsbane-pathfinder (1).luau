@@ -1,3 +1,5 @@
+-- r43: lasers park in the gap between two lanes after the purple window; photon holds the centre then outruns the blast;
+-- heated + superheated shockwaves stand in the opening centre near the boss. Switches: gsV3LaserSpot / gsV3PhotonControl.
 -- VORTEX AUTO FARM r34 | shared time-aware Voidsbane route safety | full UI
 -- r30: no new locals added to the dodge function; reuse the existing hazard-aware nav layer.
 warn('[VORTEX r34] SOURCE STARTED - if absent, loader never executed the file')
@@ -144,7 +146,7 @@ components.coreSettings = function(context)
     if _G.DungeonAutofarmDestruct then
         pcall(_G.DungeonAutofarmDestruct)
     end
-    _G.DungeonAutofarmVersion = "v3.0 c84b + Android/GS bonus r6 client evidence + throw/map toggle fix r44"
+    _G.DungeonAutofarmVersion = "v3.0 c84b + Android/GS bonus r6 client evidence"
     local burstMin, burstMaxSpeed = 18, 28
     local config = {
         tweenWalk = 16,
@@ -2738,7 +2740,7 @@ components.coreSettings = function(context)
         end
         localPlayer.OnTeleport:Connect(helper4)
     end)
-    context.SCRIPT_VERSION = "v3.0 c84b + Android/GS bonus r6 + dodge r97 (grid pathfinder A* movement) + voidsbane rbx pathfinder r14 + throw dodge fix r43 + map toggle fix r44"
+    context.SCRIPT_VERSION = "v3.0 c84b + Android/GS bonus r6 + dodge r97 (grid pathfinder A* movement) + voidsbane rbx pathfinder r14"
     pcall(function() _G.HL_DODGE_BUILD = "r97" end)
     context.SCRIPT_CODENAME = "Groups"
     context.SCRIPT_BUILD_DATE = "19 Oct 2026"
@@ -124937,7 +124939,6 @@ components.voidsbaneV3 = function(context)
             table.clear(state.plans)
             table.clear(state.owned)
             state.breath, state.melee, state.meteor = nil, nil, nil
-            throwState.markedAt, throwState.point, throwState.lastImpactAt = nil, nil, nil
             state.meteorFollowup=nil
             state.passive,state.rune,state.refilling=nil,nil,nil
             state.runeRaw=nil
@@ -125045,8 +125046,6 @@ components.voidsbaneV3 = function(context)
         end
     end
     -- ThrowLock carries a Vector3 rather than a plan table.
-    -- Mighty Lance Throw is tracked independently from the Breath plan.
-    local throwState = { markedAt = nil, point = nil, lastImpactAt = nil }
     context.v3Ingest = function(event, p, a, b, d)
         local ok, err = pcall(ingest, event, p, a, b, d)
         -- Attack groups in the order the encounter announces them, so the dodge can
@@ -125064,20 +125063,6 @@ components.voidsbaneV3 = function(context)
                 state.lastKind=group
                 state.lastKindAt=t
             end
-        end
-        if event == 'ThrowMark' or event == 'Mark' then
-            throwState.markedAt = world:GetServerTimeNow()
-            throwState.point = vector(p) and p or vector(a) and a or nil
-            throwState.lastImpactAt = nil
-        elseif event == 'ThrowLock' and vector(p) then
-            local markedAt = throwState.markedAt or world:GetServerTimeNow()
-            throwState.point = p
-            throwState.markedAt = markedAt
-            throwState.lastImpactAt = markedAt + 7.0
-            add('Impact', {point=p, at=markedAt+7.0, radius=tonumber(cfg.gsV3LanceThrowRedRadius) or 24}, markedAt+7.5)
-            add('Impact', {point=p, at=markedAt+7.6, radius=tonumber(cfg.gsV3LanceThrowOrangeRadius) or 28}, markedAt+8.2)
-        elseif event == 'ThrowRelease' or event == 'ThrowEnd' then
-            throwState.markedAt, throwState.point, throwState.lastImpactAt = nil, nil, nil
         end
         if event=='OrbForm' and vector(p) then state.airOrb={point=p,at=a} end
         if event=='OrbPos' and vector(p) and state.airOrb then state.airOrb.point=p end
@@ -125105,7 +125090,19 @@ components.voidsbaneV3 = function(context)
                 state.breathUntil=math.max(state.breathUntil or 0, at+0.8)
             end
         end
-
+        if event == "ThrowLock" and vector(p) and state.breath then
+            local plan, path = state.breath, state.breath.path
+            if path and path.throwT and number(plan.t0) then
+                local timing = path.throwT
+                local base = plan.t0 + path.stopTime
+                if number(timing.strike) and number(timing.inner) then
+                    add("Impact", { point = p, at = base + timing.strike, radius = timing.innerHit or timing.inner }, base + timing.strike + 0.5)
+                end
+                if number(timing.slam) and number(timing.outer) then
+                    add("Impact", { point = p, at = base + timing.slam, radius = timing.outerHit or timing.outer }, base + timing.slam + 0.5)
+                end
+            end
+        end
         if not ok then state.malformed += 1; state.lastError = tostring(err) end
     end
     local function distance(x, z, point)
@@ -125179,9 +125176,10 @@ components.voidsbaneV3 = function(context)
                         r=math.min(r,math.max(0,cap-(ring.standBack or 0)))
                     end
                     local door=false
-                    if r>timing.doorHalfWidth and type(ring.doors)=='table' then
+                    local dhwR=tonumber(ring.doorHalfWidth) or tonumber(ring.doorHalf) or timing.doorHalfWidth
+                    if r>dhwR and type(ring.doors)=='table' then
                         local angle=math.atan2(z-p.origin.Z,x-p.origin.X)
-                        local half=math.max(0,math.atan(timing.doorHalfWidth/r)-math.asin(math.min(1,pad/r)))
+                        local half=math.max(0,math.atan(dhwR/r)-math.asin(math.min(1,math.min(pad,math.max(1,dhwR*0.4))/r)))
                         for _,opening in ipairs(ring.doors) do
                             if number(opening) and math.abs((angle-opening+math.pi)%(2*math.pi)-math.pi)<half then door=true; break end
                         end
@@ -126378,7 +126376,7 @@ components.voidsbaneV3 = function(context)
                             local capP=(number(runeP.max) and runeP.max>0) and runeP.max or 45
                             lowRune=(runeP.value+runeP.rate*(now-runeP.at))<0.5*capP
                         end
-                        if purple and not lowRune and vector(bar.c) and vector(bar.d) then
+                        if purple and not lowRune and cfg.gsV3LaserSpot==false and vector(bar.c) and vector(bar.d) then
                             local width=c.hitHalf and c.hitHalf*2 or c.width
                             local side=Vector3.new(-bar.d.Z,0,bar.d.X)
                             if side.Magnitude>0.01 then
@@ -126604,7 +126602,12 @@ components.voidsbaneV3 = function(context)
         if not vector(goal) then return nil end
         local to=Vector3.new(goal.X-pos.X,0,goal.Z-pos.Z)
         speed=math.max(16,tonumber(speed) or 20)
-        if to.Magnitude<2 then
+        if to.Magnitude<(kind=='shockwave' and 1.0 or 2) then
+            -- r43: standing in the door centre is the whole dodge; hold it unless something else threatens the spot.
+            if kind=='shockwave' then
+                if math.max(context.v3DangerAt(pos.X,pos.Y,pos.Z,0.5),context.v3DangerAt(pos.X,pos.Y,pos.Z,1.1))<2 then return Vector3.zero end
+                return nil
+            end
             -- Reaching the center is not permission to stop under a tracked meteor.
             if kind~='circle' then return nil end
             if math.max(context.v3DangerAt(pos.X,pos.Y,pos.Z,0.5),
@@ -126790,7 +126793,7 @@ components.voidsbaneV3 = function(context)
         return best
     end
     -- r34: identify the NEAREST imminent superheated ring, not all rings at once.
-    context.v3ShockwaveTarget=function(pos,now)
+    context.v3ShockwaveTargetLegacy=function(pos,now)
         local ringBest,originBest,timingBest,etaBest=nil,nil,nil,math.huge
         -- r38: wiki: reposition while the lasers are purple. The old 1.9s window left too little time to cross the lane.
         local shockLead=tonumber(cfg.gsV3ShockLead) or 3.6
@@ -127094,6 +127097,505 @@ components.voidsbaneV3 = function(context)
         if g then return dirTo(g),'grid',false end
         return nil
     end
+    -- ===== r43: boss-pattern controller =====
+    -- Lasers (Bars): roam freely while the lanes are purple, then park in the widest gap between lanes
+    --   (works for horizontal, vertical and diagonal lanes alike) before they fire, and hold it until they clear.
+    -- Photon Supercharge (Beams): hold the circle centre until the walls turn green, then outrun the blast.
+    -- Shockwaves (Lance, heated and superheated): stand in the centre of an opening, as close to the boss as timing allows.
+    -- Everything hangs off context.v3R43 so this function gains no new locals.
+    -- cfg switches: gsV3LaserSpot=false, gsV3PhotonControl=false (back to the r42 behaviour).
+    -- cfg tuning: gsV3LaserMargin (0.45 s), gsV3LaserFreeSecs (cap on the free window), gsV3PhotonExitMargin (10 studs
+    --   past the blast), gsV3PhotonCrossMinHp (0.6), gsV3PhotonHoldGlyph, gsV3ShockMinRadius (12 studs from the origin).
+    context.v3R43={}
+    context.v3R43.latency=function()
+        return 0.08+math.clamp((tonumber(rt.pingS) or 0)*0.5,0,0.25)
+    end
+    context.v3R43.hpFrac=function(humanoid)
+        if humanoid and humanoid.MaxHealth>0 then return humanoid.Health/humanoid.MaxHealth end
+        return 1
+    end
+    -- One command path for every r43 branch (same bookkeeping the other dodge branches use).
+    -- force=true takes the straight line when the safe-leg search has nothing, or only offers a sideways leg.
+    context.v3R43.drive=function(root,humanoid,now,goal,kind,reason,holdRadius,force)
+        local pos=root.Position
+        local speed=math.max(16,rt.speedNow or humanoid.WalkSpeed or 20)
+        local to=Vector3.new(goal.X-pos.X,0,goal.Z-pos.Z)
+        local dir=nil
+        if to.Magnitude<=(holdRadius or 1.0) then
+            dir=Vector3.zero
+            if kind=='circle' then
+                -- steer() decides between holding and stepping out from under a meteor or pool
+                local okS,steer=pcall(context.v3UrgentSteer,pos,goal,speed,kind)
+                if okS and steer then dir=steer end
+            end
+        else
+            local okS,steer=pcall(context.v3UrgentSteer,pos,goal,speed,kind)
+            if okS then dir=steer end
+            if force then
+                local unit=to.Unit
+                if dir and dir.Magnitude>0.01 and unit:Dot(dir)<0.2 then dir=nil end
+                if not dir then dir=unit end
+            end
+        end
+        if not dir then return false end
+        state.heading,state.headingActive=dir,true
+        state.dodgeReason=reason
+        if context.MV then context.MV.cmdDir,context.MV.cmdAt,context.MV.driving=dir,now,true end
+        context.LC.steer(dir)
+        humanoid:Move(dir,false)
+        pcall(function() context.setState('VOIDSBANE V3: '..reason) end)
+        return true
+    end
+
+    -- ---------- lasers ----------
+    -- Distance from (x,z) to the nearest padded lane rectangle; negative means inside one.
+    context.v3R43.laneClear=function(x,z,lanes,pad)
+        local best=math.huge
+        for i=1,#lanes do
+            local ln=lanes[i]
+            local dx,dz=x-ln.cx,z-ln.cz
+            local u=dx*ln.dx+dz*ln.dz
+            local v=-dx*ln.dz+dz*ln.dx
+            local ou=math.abs(u)-ln.hl
+            local ov=math.abs(v)-ln.hw
+            local out
+            if ou>0 and ov>0 then out=math.sqrt(ou*ou+ov*ov) else out=math.max(ou,ov) end
+            out=out-pad
+            if out<best then best=out end
+        end
+        return best
+    end
+    -- Lane footprints and phase timing straight from the Bars payload. Timing matches depth():
+    -- purple = [warn+blinkAt+0.08, warn+blinkAt+blink-0.15), the lane is live again after that until warn+live.
+    context.v3R43.lanes=function(now)
+        local lanes={}
+        local info={hasBlink=false,anyFire=false,anyPurple=false,returnBy=math.huge}
+        for _,h in ipairs(state.plans) do
+            if h.kind=='Bars' and h.expires>now and type(h.p)=='table' and type(h.p.cfg)=='table'
+                and type(h.p.bars)=='table' and number(h.p.t0) then
+                local c=h.p.cfg
+                local step=tonumber(c.step) or 0
+                local warn=tonumber(c.warn) or 0
+                local live=tonumber(c.live) or 0
+                local length=tonumber(c.length) or 0
+                local halfW=tonumber(c.hitHalf) or ((tonumber(c.width) or 0)*0.5)
+                local blink=number(c.blinkAt) and number(c.blink) and c.blink>0
+                for i,bar in ipairs(h.p.bars) do
+                    if vector(bar.c) and vector(bar.d) and length>0 and halfW>0 then
+                        local flat=Vector3.new(bar.d.X,0,bar.d.Z)
+                        local base=h.p.t0+(i-1)*step
+                        if flat.Magnitude>0.001 and now<base+warn+live+0.2 then
+                            flat=flat.Unit
+                            lanes[#lanes+1]={cx=bar.c.X,cz=bar.c.Z,dx=flat.X,dz=flat.Z,hl=length*0.5,hw=halfW}
+                            if blink then
+                                info.hasBlink=true
+                                local pS=base+warn+c.blinkAt+0.08
+                                local pE=base+warn+c.blinkAt+c.blink-0.15
+                                if now>=pE then
+                                    info.anyFire=true
+                                else
+                                    if pE<info.returnBy then info.returnBy=pE end
+                                    if now>=pS then
+                                        info.anyPurple=true
+                                        if not info.firstPS or pS<info.firstPS then info.firstPS=pS end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return lanes,info
+    end
+    -- Safe spot = the point with the most room between lanes (the middle of a gap), then nudged to the exact
+    -- middle by hill-climbing. Candidates are weighed by walking time, boss and glyph distance, and other hazards.
+    context.v3R43.laserSpot=function(pos,now,lanes,tFire,speed)
+        local padL=padNow()+1.5
+        local lat=context.v3R43.latency()
+        local bossP=context.v3BossPoint()
+        local glyph=state.passive and state.passive.glyph
+        local arenaC=bossP or glyph or pos
+        local maxR=context.v3ArenaRadius()-3
+        local sumK=0
+        for i=1,#lanes do sumK=sumK+lanes[i].cx*1.3+lanes[i].cz*0.7+lanes[i].dx end
+        local key=string.format('%d:%.1f',#lanes,sumK)
+        local held=state.laserSpot
+        if held and held.key==key and now-held.at<0.25 then return held.p end
+        if held and held.key==key and now-held.at<2.5 then
+            local c0=context.v3R43.laneClear(held.p.X,held.p.Z,lanes,padL)
+            local d0=math.max(context.v3DangerAt(held.p.X,held.p.Y,held.p.Z,math.max(0,tFire)),
+                context.v3DangerAt(held.p.X,held.p.Y,held.p.Z,math.max(0,tFire)+1.0))
+            if c0>=1.0 and d0<3 then return held.p end
+        end
+        local step=3
+        local n=math.floor(maxR/step)
+        local cands,maxClear={},-math.huge
+        for ix=-n,n do
+            for iz=-n,n do
+                local x=arenaC.X+ix*step
+                local z=arenaC.Z+iz*step
+                if distance(x,z,arenaC)<=maxR then
+                    local clear=context.v3R43.laneClear(x,z,lanes,padL)
+                    cands[#cands+1]={x=x,z=z,c=clear}
+                    if clear>maxClear then maxClear=clear end
+                end
+            end
+        end
+        local thr=math.min(2.0,maxClear*0.8)
+        local scored={}
+        for _,cd in ipairs(cands) do
+            if cd.c>=thr then
+                local s=distance(cd.x,cd.z,pos)*0.10-math.min(cd.c,8)*1.5
+                if vector(bossP) then s=s+distance(cd.x,cd.z,bossP)*0.05 end
+                if vector(glyph) then s=s+distance(cd.x,cd.z,glyph)*0.03 end
+                if held and held.key==key and distance(cd.x,cd.z,held.p)<4 then s=s-3 end
+                cd.s=s
+                scored[#scored+1]=cd
+            end
+        end
+        if #scored==0 then return nil end
+        table.sort(scored,function(a,b) return a.s<b.s end)
+        local best,bestScore,bestDng=nil,math.huge,0
+        for i=1,math.min(10,#scored) do
+            local cd=scored[i]
+            local tArr=distance(cd.x,cd.z,pos)/speed+lat
+            local dng=0
+            for _,t in ipairs({tArr,math.max(tFire,tArr)+0.2,math.max(tFire,tArr)+1.2}) do
+                local d=context.v3DangerAt(cd.x,pos.Y,cd.z,math.max(0,t))
+                if d>dng then dng=d end
+            end
+            local s=cd.s+dng*25
+            if not context.v3LaserPathClear(pos,Vector3.new(cd.x,pos.Y,cd.z)) then s=s+30 end
+            if s<bestScore then best,bestScore,bestDng=cd,s,dng end
+        end
+        if not best then return nil end
+        local bx,bz,bc=best.x,best.z,best.c
+        local x0,z0=bx,bz
+        local stepS=2.0
+        for _=1,24 do
+            local improved=false
+            for k=0,7 do
+                local a=k*math.pi/4
+                local nx,nz=bx+math.cos(a)*stepS,bz+math.sin(a)*stepS
+                if distance(nx,nz,arenaC)<=maxR and math.abs(nx-x0)+math.abs(nz-z0)<=11 then
+                    local nc=context.v3R43.laneClear(nx,nz,lanes,padL)
+                    if math.min(nc,14)>math.min(bc,14)+0.05 then
+                        bx,bz,bc,improved=nx,nz,nc,true
+                    end
+                end
+            end
+            if not improved then
+                stepS=stepS*0.5
+                if stepS<0.4 then break end
+            end
+        end
+        if bx~=x0 or bz~=z0 then
+            local d1=math.max(context.v3DangerAt(bx,pos.Y,bz,math.max(0,tFire)+0.2),
+                context.v3DangerAt(bx,pos.Y,bz,math.max(0,tFire)+1.2))
+            if d1>bestDng+0.5 then bx,bz=x0,z0 end
+        end
+        local spot=Vector3.new(bx,pos.Y,bz)
+        state.laserSpot={key=key,at=now,p=spot}
+        return spot
+    end
+    context.v3R43.laser=function(root,humanoid,serverNow,now)
+        if cfg.gsV3LaserSpot==false then return false end
+        local lanes,info=context.v3R43.lanes(serverNow)
+        if #lanes==0 then
+            state.laserSpot=nil
+            return false
+        end
+        -- a breath volley is aimed at where we stand: its straight-line rule keeps the wheel
+        if number(state.breathUntil) and serverNow<state.breathUntil and serverNow>=(state.breathStart or 0) then
+            return false
+        end
+        local pos=root.Position
+        local speed=math.max(16,rt.speedNow or humanoid.WalkSpeed or 20)
+        local lat=context.v3R43.latency()
+        local margin=tonumber(cfg.gsV3LaserMargin) or 0.45
+        if info.anyFire or not info.hasBlink then
+            local spot=context.v3R43.laserSpot(pos,serverNow,lanes,0,speed)
+            if not spot then return false end
+            return context.v3R43.drive(root,humanoid,now,spot,'laser','lasers firing: hold the gap between two lanes',1.0,false)
+        end
+        -- Still yellow: the r42 hazard layer keeps us out of the lanes. Free roam opens with the purple.
+        if not info.anyPurple then return false end
+        local retBy=info.returnBy
+        local capSecs=tonumber(cfg.gsV3LaserFreeSecs)
+        if capSecs and info.firstPS then retBy=math.min(retBy,info.firstPS+capSecs) end
+        local freeLeft=retBy-serverNow
+        local spot=context.v3R43.laserSpot(pos,serverNow,lanes,math.max(0,freeLeft),speed)
+        if not spot then return false end
+        local travel=distance(pos.X,pos.Z,spot)/speed+lat
+        if freeLeft-travel-margin>0 then return false end
+        return context.v3R43.drive(root,humanoid,now,spot,'laser','lasers: back to the gap before they fire',1.0,false)
+    end
+
+    -- ---------- photon supercharge ----------
+    context.v3R43.beamTimes=function(c)
+        local cs=tonumber(c.closeStart) or 1
+        local ct=tonumber(c.closeTime) or 2
+        local gt=tonumber(c.greenTime) or 1
+        local cv=tonumber(c.convergeTime) or 1
+        local gl=tonumber(c.greenLead) or 0
+        local gLate=tonumber(c.greenLate) or 0
+        local aft=tonumber(c.aftermath) or 0.5
+        local reach=cs+ct
+        local explode=reach+gt+cv+0.2
+        return {green=reach-(gl-gLate),explode=explode,finish=explode+aft}
+    end
+    -- Exit point past blast radius + margin, reachable before the explosion, clear of debris, boss side preferred.
+    context.v3R43.pickExit=function(pos,beam,blast,margin,timeLeft,speed)
+        local lat=context.v3R43.latency()
+        local bossP=context.v3BossPoint()
+        local arenaC=bossP or (state.passive and state.passive.glyph)
+        local maxR=context.v3ArenaRadius()
+        local best,bestScore=nil,math.huge
+        for _,R in ipairs({blast+margin,blast+margin+8}) do
+            for i=0,23 do
+                local ang=i*math.pi/12
+                local cand=Vector3.new(beam.center.X+math.cos(ang)*R,pos.Y,beam.center.Z+math.sin(ang)*R)
+                if not vector(arenaC) or distance(cand.X,cand.Z,arenaC)<=maxR then
+                    local L=distance(pos.X,pos.Z,cand)
+                    local tArr=L/speed+lat
+                    local score=L*0.25
+                    if tArr>timeLeft-0.15 then score=score+30+(tArr-timeLeft+0.15)*20 end
+                    for _,t in ipairs({0.6,1.2,1.8,2.4,timeLeft+0.5,timeLeft+1.5,timeLeft+2.5}) do
+                        score=score+math.max(0,context.v3DangerAt(cand.X,cand.Y,cand.Z,t))*3
+                    end
+                    if vector(bossP) then score=score+distance(cand.X,cand.Z,bossP)*0.08 end
+                    if not context.v3LaserPathClear(pos,cand) then score=score+60 end
+                    if score<bestScore then best,bestScore=cand,score end
+                end
+            end
+        end
+        if not best then
+            local outward=Vector3.new(pos.X-beam.center.X,0,pos.Z-beam.center.Z)
+            outward=outward.Magnitude>0.1 and outward.Unit or Vector3.xAxis
+            best=Vector3.new(beam.center.X,pos.Y,beam.center.Z)+outward*(blast+margin)
+        end
+        return best
+    end
+    context.v3R43.photon=function(root,humanoid,serverNow,now)
+        if cfg.gsV3PhotonControl==false then return false end
+        local pos=root.Position
+        local speed=math.max(16,rt.speedNow or humanoid.WalkSpeed or 20)
+        local lock=state.beamLock
+        if lock and (type(lock.plan)~='table' or lock.plan.expires<=serverNow) then
+            lock=nil
+            state.beamLock=nil
+        end
+        if not lock then
+            local nearest=math.huge
+            for _,plan in ipairs(state.plans) do
+                if plan.kind=='Beams' and plan.expires>serverNow and type(plan.p)=='table'
+                    and type(plan.p.cfg)=='table' and type(plan.p.beams)=='table' then
+                    local c=plan.p.cfg
+                    local T=context.v3R43.beamTimes(c)
+                    local blastC=tonumber(c.blastRadius) or 12
+                    local inner=math.max(tonumber(c.endRadius) or 10,blastC)
+                    for _,beam in ipairs(plan.p.beams) do
+                        if vector(beam.center) and number(beam.startAt) then
+                            local elapsed=serverNow-beam.startAt
+                            local gap=distance(pos.X,pos.Z,beam.center)
+                            local engage=gap<=inner+35
+                            if not engage then
+                                -- sprint in from further away whenever the interior is reachable before green
+                                local timeLeft=beam.startAt+T.green-serverNow
+                                if timeLeft>0.2 and (gap-inner)<=speed*timeLeft+5 then engage=true end
+                            end
+                            if engage and elapsed>=-2 and elapsed<T.finish and gap<nearest
+                                and (elapsed<T.green or gap<blastC+12) then
+                                lock={plan=plan,beam=beam,release=T.green,aftermath=T.finish}
+                                nearest=gap
+                            end
+                        end
+                    end
+                end
+            end
+            state.beamLock=lock
+        end
+        if not lock then return false end
+        local c=lock.plan.p.cfg
+        local beam=lock.beam
+        local T=context.v3R43.beamTimes(c)
+        local elapsed=serverNow-beam.startAt
+        local blast=tonumber(c.blastRadius) or photonBlast()
+        local pad=padNow()
+        local centre=Vector3.new(beam.center.X,pos.Y,beam.center.Z)
+        local gap=distance(pos.X,pos.Z,centre)
+        local greenSeen=false
+        if elapsed>=T.green-1.2 and cfg.gsV3PhotonVisual~=false then
+            local ph=visual.photon()
+            greenSeen=ph~=nil and ph.green==true
+        end
+        if elapsed<T.green and not greenSeen then
+            -- Walls are closing: the centre is the only safe place. Hold it (or the glyph when it sits inside the final circle).
+            local hold=centre
+            local glyph=state.passive and state.passive.glyph
+            if cfg.gsV3PhotonHoldGlyph~=false and vector(glyph) then
+                local safeR=math.min(tonumber(c.endRadius) or 12,blast)-4
+                if safeR>2 and distance(glyph.X,glyph.Z,beam.center)<safeR then
+                    hold=Vector3.new(glyph.X,pos.Y,glyph.Z)
+                end
+            end
+            -- Starting outside the wall means crossing it once. Worth it while a hit is survivable.
+            local r0=tonumber(beam.r0) or 35
+            local endR=tonumber(c.endRadius) or 12
+            local cs=tonumber(c.closeStart) or 1
+            local ct=math.max(0.1,tonumber(c.closeTime) or 2)
+            local radiusNow=r0+(endR-r0)*math.clamp((elapsed-cs)/ct,0,1)
+            local outside=elapsed>=(tonumber(c.rodsAt) or 0) and gap>radiusNow+pad
+            local force=true
+            if outside and context.v3R43.hpFrac(humanoid)<(tonumber(cfg.gsV3PhotonCrossMinHp) or 0.6) then force=false end
+            return context.v3R43.drive(root,humanoid,now,hold,'circle','photon: centre until the walls turn green',1.0,force)
+        end
+        -- Green: the circle turns yellow/white and explodes. Get well past the blast radius.
+        local margin=tonumber(cfg.gsV3PhotonExitMargin) or 10
+        if elapsed>=T.finish then return false end
+        if elapsed>=T.explode-0.2 and gap>=blast+pad+2 then return false end
+        local timeLeft=beam.startAt+T.explode-serverNow
+        local exit=lock.exit
+        local keep=false
+        if exit and vector(exit) then
+            local exitGap=distance(exit.X,exit.Z,beam.center)
+            if exitGap>=blast+margin-1 and context.v3DangerAt(exit.X,exit.Y,exit.Z,0.5)<3 then keep=true end
+        end
+        if not keep then
+            lock.exit=context.v3R43.pickExit(pos,beam,blast,margin,timeLeft,speed)
+            exit=lock.exit
+        end
+        if not exit then return false end
+        return context.v3R43.drive(root,humanoid,now,exit,'circle',
+            'photon green: run '..string.format('%.0f',blast+margin)..' studs from the centre',1.5,true)
+    end
+
+    context.v3R43.run=function(root,humanoid,serverNow,now)
+        local ok,handled=pcall(context.v3R43.photon,root,humanoid,serverNow,now)
+        if ok and handled then return true end
+        if not ok then state.r43Error='photon: '..tostring(handled) end
+        ok,handled=pcall(context.v3R43.laser,root,humanoid,serverNow,now)
+        if ok and handled then return true end
+        if not ok then state.r43Error='laser: '..tostring(handled) end
+        return false
+    end
+
+    -- ---------- shockwave openings (heated + superheated) ----------
+    -- Same radius curve as depth(), so arrival times match what the hazard layer predicts.
+    context.v3R43.ringRadius=function(timing,ring,age)
+        local rl=tonumber(timing.ringLife) or 3.3
+        local life=tonumber(ring.life) or rl
+        local slow=tonumber(ring.slow) or 1
+        local steady=tonumber(ring.steady) or 0
+        local full=math.log(1+rl/0.6)*52
+        local function shape(t)
+            t=math.max(t,0)
+            if slow>1 then
+                local v=math.min(t,rl*slow)
+                return full*((1-steady)*v/(rl*slow)+steady*math.log(1+v/(0.6*slow))/math.log(1+rl/0.6))
+            end
+            return math.log(1+t/0.6)*52
+        end
+        local a=ring.stand and math.min(age,life) or age
+        local r=shape(a)
+        if ring.stand then r=math.min(r,math.max(0,shape(life)-(tonumber(ring.standBack) or 0))) end
+        return r
+    end
+    context.v3R43.ringArrival=function(plan,ring,radius)
+        local timing=plan.timing
+        local rl=tonumber(timing.ringLife) or 3.3
+        local life=tonumber(ring.life) or rl
+        local lo,hi=0,math.max(life,tonumber(ring.standMax) or 0)+0.5
+        if context.v3R43.ringRadius(timing,ring,hi)<radius then return math.huge end
+        for _=1,22 do
+            local mid=(lo+hi)*0.5
+            if context.v3R43.ringRadius(timing,ring,mid)>=radius then hi=mid else lo=mid end
+        end
+        return plan.t0+ring.launch+hi
+    end
+    -- Door centre on the radial line through the opening. The radius is the smallest one (closest to the boss) we can
+    -- still reach before the wave gets there; narrow heated openings work the same way, only the hazard layer's door
+    -- padding was capped (see depth) so a small opening does not collapse to nothing.
+    context.v3R43.doorTarget=function(pos,now,plan,ring,eta)
+        local pick=state.shockPick
+        if pick and pick.ring==ring and now-pick.at<0.2 then return pick.p,eta end
+        local timing=plan.timing
+        local origin=plan.origin
+        local pad=padNow()
+        local speed=math.max(16,rt.speedNow or 20)
+        local lat=context.v3R43.latency()
+        local boss=context.v3BossPoint()
+        local arenaC=boss or (state.passive and state.passive.glyph)
+        local maxR=context.v3ArenaRadius()
+        local rNow=math.max(6,distance(pos.X,pos.Z,origin))
+        local rMin=math.max(tonumber(cfg.gsV3ShockMinRadius) or 12,(tonumber(timing.markerRadius) or 6)+pad+1.5)
+        local radii={}
+        local r=rMin
+        while r<rNow do
+            radii[#radii+1]=r
+            r=r+3
+        end
+        radii[#radii+1]=rNow
+        local best,bestScore,bestTheta,bestR=nil,math.huge,nil,nil
+        for _,theta in pairs(ring.doors) do
+            if number(theta) then
+                for _,rad in ipairs(radii) do
+                    local P=Vector3.new(origin.X+math.cos(theta)*rad,pos.Y,origin.Z+math.sin(theta)*rad)
+                    if not vector(arenaC) or distance(P.X,P.Z,arenaC)<=maxR then
+                        local L=distance(pos.X,pos.Z,P)
+                        local tArr=L/speed+lat
+                        local wave=context.v3R43.ringArrival(plan,ring,rad)-now
+                        local score=L*0.12
+                        if vector(boss) then score=score+distance(P.X,P.Z,boss)*0.35 end
+                        if wave~=math.huge and tArr+0.35>wave then score=score+50+(tArr+0.35-wave)*25 end
+                        local danger=math.max(context.v3DangerAt(P.X,P.Y,P.Z,tArr),
+                            context.v3DangerAt(P.X,P.Y,P.Z,math.max(tArr,math.min(wave,8))))
+                        score=score+math.max(0,danger)*6
+                        if pick and pick.ring==ring and math.abs(pick.theta-theta)<0.001 and math.abs(pick.r-rad)<1.6 then
+                            score=score-4
+                        end
+                        if score<bestScore then best,bestScore,bestTheta,bestR=P,score,theta,rad end
+                    end
+                end
+            end
+        end
+        if not best then return nil end
+        state.shockPick={ring=ring,theta=bestTheta,r=bestR,p=best,at=now}
+        return best,eta
+    end
+    context.v3R43.shock=function(pos,now)
+        local ringBest,planBest,etaBest=nil,nil,math.huge
+        local shockLead=tonumber(cfg.gsV3ShockLead) or 3.6
+        for _,h in ipairs(state.plans) do
+            if h.kind=='Lance' and h.expires>now and type(h.p)=='table' and vector(h.p.origin)
+                and type(h.p.timing)=='table' and number(h.p.t0) then
+                local timing=h.p.timing
+                local radius=math.max(6,distance(pos.X,pos.Z,h.p.origin))
+                for _,ring in ipairs(h.p.rings or {}) do
+                    if type(ring)=='table' and type(ring.doors)=='table' and number(ring.launch) then
+                        local elapsed=now-h.p.t0-ring.launch
+                        local life=tonumber(ring.stand and ring.standMax or ring.life) or tonumber(timing.ringLife) or 3.3
+                        local released=ring.stand and h.p.releaseAt and now>=h.p.releaseAt+(tonumber(timing.standFade) or 0.8)
+                        if not released and elapsed<life and elapsed>-shockLead then
+                            local eta=context.v3R43.ringArrival(h.p,ring,radius)-now
+                            if eta>-0.22 and eta<shockLead+2.6 and eta<etaBest then
+                                ringBest,planBest,etaBest=ring,h.p,eta
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if not ringBest then return nil end
+        return context.v3R43.doorTarget(pos,now,planBest,ringBest,etaBest)
+    end
+    context.v3ShockwaveTarget=function(pos,now)
+        local ok,target,eta=pcall(context.v3R43.shock,pos,now)
+        if ok then return target,eta end
+        state.r43Error='shock: '..tostring(target)
+        return context.v3ShockwaveTargetLegacy(pos,now)
+    end
     context.v3DodgeApply = function(now)
         if not rt.farmEnabled or (#state.plans==0 and not state.passive) or cfg.gsV3Dodge==false then return end
         local _,humanoid,root=context.character()
@@ -127177,11 +127679,12 @@ components.voidsbaneV3 = function(context)
         -- r34: critical arena mechanics outrank a randomly chosen meteor heading.
         -- Their route is still checked against the same predicted and visual hazards.
         do
+            if context.v3R43 and context.v3R43.run(root,humanoid,serverNow,now) then return end
             local target=context.v3ClosingCentre(root.Position,serverNow)
             local reason='closing circle centre'
             if not target then
                 target=context.v3ShockwaveTarget(root.Position,serverNow)
-                reason='superheated shockwave opening'
+                reason='shockwave opening'
             end
             if target then
                 local dir=context.v3UrgentSteer(root.Position,target,rt.speedNow or humanoid.WalkSpeed,
@@ -127301,61 +127804,6 @@ components.voidsbaneV3 = function(context)
             end
         end
         state.breathHeading=nil
-        -- Mighty Lance Throw: escape the locked point immediately and remain outside
-        -- both timed blast circles through the orange follow-up. The article says
-        -- marker at about +2s, red impact five seconds later, then orange aftermath.
-        if throwState.point and throwState.markedAt then
-            local nowThrow = world:GetServerTimeNow()
-            local ageThrow = nowThrow - throwState.markedAt
-            if ageThrow >= 0 and ageThrow <= 8.2 then
-                local originThrow = throwState.point
-                local awayThrow = Vector3.new(root.Position.X-originThrow.X,0,root.Position.Z-originThrow.Z)
-                awayThrow = awayThrow.Magnitude > 0.1 and awayThrow.Unit or Vector3.xAxis
-                local redRadius = tonumber(cfg.gsV3LanceThrowRedRadius) or 24
-                local orangeRadius = tonumber(cfg.gsV3LanceThrowOrangeRadius) or 28
-                local desiredRadius = math.max(redRadius,orangeRadius) + (tonumber(cfg.gsV3LanceThrowMargin) or 8)
-                local destination = originThrow + awayThrow * desiredRadius
-                local arenaCenter = context.v3BossPoint and context.v3BossPoint()
-                local arenaRadius = context.v3ArenaRadius()
-                local toDestination = Vector3.new(destination.X-root.Position.X,0,destination.Z-root.Position.Z)
-                local travel = math.min(toDestination.Magnitude, math.max(16,(rt.speedNow or humanoid.WalkSpeed or 20)*1.4))
-                local side = Vector3.new(-awayThrow.Z,0,awayThrow.X)
-                local candidates = {}
-                if toDestination.Magnitude > 0.1 then candidates[#candidates+1]=toDestination.Unit end
-                candidates[#candidates+1]=side
-                candidates[#candidates+1]=-side
-                candidates[#candidates+1]=-awayThrow
-                local chosenThrow, scoreThrow = nil, math.huge
-                for _,dirThrow in ipairs(candidates) do
-                    local candidate = root.Position + dirThrow*travel
-                    local fromMark = distance(candidate.X,candidate.Z,originThrow)
-                    local insideArena = not vector(arenaCenter) or distance(candidate.X,candidate.Z,arenaCenter) <= arenaRadius-3
-                    local safeLeg = insideArena and context.v3LegSafe(root.Position,candidate,rt.speedNow or humanoid.WalkSpeed)
-                    local arrival = travel/math.max(16,rt.speedNow or humanoid.WalkSpeed)
-                    local riskThrow = context.v3DangerAt(candidate.X,candidate.Y,candidate.Z,arrival+0.2)
-                    if safeLeg and riskThrow < 3 then
-                        local score = math.max(0,desiredRadius-fromMark)*10 + riskThrow*100
-                        if score < scoreThrow then chosenThrow,scoreThrow=dirThrow,score end
-                    end
-                end
-                if not chosenThrow then
-                    chosenThrow = side
-                    if context.v3DangerAt(root.Position.X+side.X*8,root.Position.Y,root.Position.Z+side.Z*8,0.4)
-                        > context.v3DangerAt(root.Position.X-side.X*8,root.Position.Y,root.Position.Z-side.Z*8,0.4) then
-                        chosenThrow=-side
-                    end
-                end
-                state.heading,state.headingActive=chosenThrow,true
-                state.dodgeReason='Mighty Lance Throw: clear red and orange circles'
-                if context.MV then context.MV.cmdDir,context.MV.cmdAt,context.MV.driving=chosenThrow,now,true end
-                context.LC.steer(chosenThrow)
-                humanoid:Move(chosenThrow,false)
-                pcall(function() context.setState('VOIDSBANE V3: clear Mighty Lance Throw circles') end)
-                return
-            else
-                throwState.markedAt,throwState.point,throwState.lastImpactAt=nil,nil,nil
-            end
-        end
         -- r16: telegraphed red floor lane. Capture the actual rendered warning geometry,
         -- not just the server hazard packet; the red decal precedes damage.
         local redLane=nil
@@ -170366,6 +170814,7 @@ __vortexStage('loadConfig OK')
 context.CFG.hitboxesMinimapOnly=true
 context.CFG.visuals=false
 context.CFG.minimap=true
+context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
 context.CFG.minimapRange=180
@@ -170525,12 +170974,10 @@ do
     if not ok then error('[VORTEX STARTUP: clientDiagnostics] '..tostring(err),0) end
 end
 -- Apply after UI defaults/profile restoration as well.
+context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
-if context.MM and context.MM.setView then
-    local selectedMapView = context.CFG.mapBlankScreen==true and 'blank' or (context.CFG.mapBg3D~=false and context.CFG.renderOff~=true and '3d' or '2d')
-    context.MM.setView(selectedMapView)
-end
+if context.MM and context.MM.setView then context.MM.setView('2d') end
 -- VORTEX r32: restore original full-featured UI rather than the incomplete r23 replacement.
 -- The legacy UI includes its original controls, callbacks, sliders and party settings.
 __vortexStage('restoring complete original UI')
