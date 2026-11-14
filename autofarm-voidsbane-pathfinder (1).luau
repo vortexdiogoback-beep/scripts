@@ -170312,8 +170312,22 @@ context.CFG.minimapSmoothHz=15
 context.CFG.minimapRange=180
 context.CFG.gsWideCamera=true
 context.CFG.gsCameraDistance=125
--- r36: built-in low-lag block off (shadows, bloom/sunrays/DoF, QualityLevel2). Read in components.voidsbaneV3.
-context.CFG.gsLowLag=false
+-- r40: low-lag block (shadows, bloom/sunrays/DoF, QualityLevel2) stays ON for touch devices, where turning it off
+-- crashed the client, and OFF for PC. Set context.CFG.gsLowLag yourself to override. Read in components.voidsbaneV3.
+do
+    local okInput,uis=pcall(function() return game:GetService('UserInputService') end)
+    local touchOnly=(okInput and uis and uis.TouchEnabled and not uis.KeyboardEnabled) and true or false
+    if context.CFG.gsLowLag==nil then
+        context.CFG.gsLowLag=touchOnly
+    end
+    -- r41: Walls v2 deletes the game's Map folder, rebuilds it from plain dark-red SmoothPlastic parts, clears terrain,
+    -- flattens water and removes fog. That is the textureless look. Off on PC; touch devices keep it (memory).
+    -- Set context.CFG.gsKeepWalls=true to keep it on PC as well.
+    if not touchOnly and context.CFG.gsKeepWalls~=true then
+        context.CFG.wallsOn=false
+        context.CFG.wallClearView=false
+    end
+end
 do
     __vortexStage('attackCatalog starting')
     local ok,err=pcall(components.attackCatalog,context)
