@@ -170320,10 +170320,10 @@ do
     if context.CFG.gsLowLag==nil then
         context.CFG.gsLowLag=touchOnly
     end
-    -- r41: Walls v2 deletes the game's Map folder, rebuilds it from plain dark-red SmoothPlastic parts, clears terrain,
-    -- flattens water and removes fog. That is the textureless look. Off on PC; touch devices keep it (memory).
-    -- Set context.CFG.gsKeepWalls=true to keep it on PC as well.
-    if not touchOnly and context.CFG.gsKeepWalls~=true then
+    -- r42: Walls v2 deletes the game's Map folder, rebuilds it from plain dark-red SmoothPlastic parts, clears terrain,
+    -- flattens water and removes fog. That is the textureless look. Off on every platform now.
+    -- Set context.CFG.gsKeepWalls=true to bring it back (it lowers memory use on phones).
+    if context.CFG.gsKeepWalls~=true then
         context.CFG.wallsOn=false
         context.CFG.wallClearView=false
     end
