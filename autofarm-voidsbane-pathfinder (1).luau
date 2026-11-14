@@ -144,7 +144,7 @@ components.coreSettings = function(context)
     if _G.DungeonAutofarmDestruct then
         pcall(_G.DungeonAutofarmDestruct)
     end
-    _G.DungeonAutofarmVersion = "v3.0 c84b + Android/GS bonus r6 client evidence"
+    _G.DungeonAutofarmVersion = "v3.0 c84b + Android/GS bonus r6 client evidence + throw/map toggle fix r44"
     local burstMin, burstMaxSpeed = 18, 28
     local config = {
         tweenWalk = 16,
@@ -2738,7 +2738,7 @@ components.coreSettings = function(context)
         end
         localPlayer.OnTeleport:Connect(helper4)
     end)
-    context.SCRIPT_VERSION = "v3.0 c84b + Android/GS bonus r6 + dodge r97 (grid pathfinder A* movement) + voidsbane rbx pathfinder r14"
+    context.SCRIPT_VERSION = "v3.0 c84b + Android/GS bonus r6 + dodge r97 (grid pathfinder A* movement) + voidsbane rbx pathfinder r14 + throw dodge fix r43 + map toggle fix r44"
     pcall(function() _G.HL_DODGE_BUILD = "r97" end)
     context.SCRIPT_CODENAME = "Groups"
     context.SCRIPT_BUILD_DATE = "19 Oct 2026"
@@ -124937,6 +124937,7 @@ components.voidsbaneV3 = function(context)
             table.clear(state.plans)
             table.clear(state.owned)
             state.breath, state.melee, state.meteor = nil, nil, nil
+            throwState.markedAt, throwState.point, throwState.lastImpactAt = nil, nil, nil
             state.meteorFollowup=nil
             state.passive,state.rune,state.refilling=nil,nil,nil
             state.runeRaw=nil
@@ -125044,6 +125045,8 @@ components.voidsbaneV3 = function(context)
         end
     end
     -- ThrowLock carries a Vector3 rather than a plan table.
+    -- Mighty Lance Throw is tracked independently from the Breath plan.
+    local throwState = { markedAt = nil, point = nil, lastImpactAt = nil }
     context.v3Ingest = function(event, p, a, b, d)
         local ok, err = pcall(ingest, event, p, a, b, d)
         -- Attack groups in the order the encounter announces them, so the dodge can
@@ -125061,6 +125064,20 @@ components.voidsbaneV3 = function(context)
                 state.lastKind=group
                 state.lastKindAt=t
             end
+        end
+        if event == 'ThrowMark' or event == 'Mark' then
+            throwState.markedAt = world:GetServerTimeNow()
+            throwState.point = vector(p) and p or vector(a) and a or nil
+            throwState.lastImpactAt = nil
+        elseif event == 'ThrowLock' and vector(p) then
+            local markedAt = throwState.markedAt or world:GetServerTimeNow()
+            throwState.point = p
+            throwState.markedAt = markedAt
+            throwState.lastImpactAt = markedAt + 7.0
+            add('Impact', {point=p, at=markedAt+7.0, radius=tonumber(cfg.gsV3LanceThrowRedRadius) or 24}, markedAt+7.5)
+            add('Impact', {point=p, at=markedAt+7.6, radius=tonumber(cfg.gsV3LanceThrowOrangeRadius) or 28}, markedAt+8.2)
+        elseif event == 'ThrowRelease' or event == 'ThrowEnd' then
+            throwState.markedAt, throwState.point, throwState.lastImpactAt = nil, nil, nil
         end
         if event=='OrbForm' and vector(p) then state.airOrb={point=p,at=a} end
         if event=='OrbPos' and vector(p) and state.airOrb then state.airOrb.point=p end
@@ -125088,19 +125105,7 @@ components.voidsbaneV3 = function(context)
                 state.breathUntil=math.max(state.breathUntil or 0, at+0.8)
             end
         end
-        if event == "ThrowLock" and vector(p) and state.breath then
-            local plan, path = state.breath, state.breath.path
-            if path and path.throwT and number(plan.t0) then
-                local timing = path.throwT
-                local base = plan.t0 + path.stopTime
-                if number(timing.strike) and number(timing.inner) then
-                    add("Impact", { point = p, at = base + timing.strike, radius = timing.innerHit or timing.inner }, base + timing.strike + 0.5)
-                end
-                if number(timing.slam) and number(timing.outer) then
-                    add("Impact", { point = p, at = base + timing.slam, radius = timing.outerHit or timing.outer }, base + timing.slam + 0.5)
-                end
-            end
-        end
+
         if not ok then state.malformed += 1; state.lastError = tostring(err) end
     end
     local function distance(x, z, point)
@@ -127296,6 +127301,61 @@ components.voidsbaneV3 = function(context)
             end
         end
         state.breathHeading=nil
+        -- Mighty Lance Throw: escape the locked point immediately and remain outside
+        -- both timed blast circles through the orange follow-up. The article says
+        -- marker at about +2s, red impact five seconds later, then orange aftermath.
+        if throwState.point and throwState.markedAt then
+            local nowThrow = world:GetServerTimeNow()
+            local ageThrow = nowThrow - throwState.markedAt
+            if ageThrow >= 0 and ageThrow <= 8.2 then
+                local originThrow = throwState.point
+                local awayThrow = Vector3.new(root.Position.X-originThrow.X,0,root.Position.Z-originThrow.Z)
+                awayThrow = awayThrow.Magnitude > 0.1 and awayThrow.Unit or Vector3.xAxis
+                local redRadius = tonumber(cfg.gsV3LanceThrowRedRadius) or 24
+                local orangeRadius = tonumber(cfg.gsV3LanceThrowOrangeRadius) or 28
+                local desiredRadius = math.max(redRadius,orangeRadius) + (tonumber(cfg.gsV3LanceThrowMargin) or 8)
+                local destination = originThrow + awayThrow * desiredRadius
+                local arenaCenter = context.v3BossPoint and context.v3BossPoint()
+                local arenaRadius = context.v3ArenaRadius()
+                local toDestination = Vector3.new(destination.X-root.Position.X,0,destination.Z-root.Position.Z)
+                local travel = math.min(toDestination.Magnitude, math.max(16,(rt.speedNow or humanoid.WalkSpeed or 20)*1.4))
+                local side = Vector3.new(-awayThrow.Z,0,awayThrow.X)
+                local candidates = {}
+                if toDestination.Magnitude > 0.1 then candidates[#candidates+1]=toDestination.Unit end
+                candidates[#candidates+1]=side
+                candidates[#candidates+1]=-side
+                candidates[#candidates+1]=-awayThrow
+                local chosenThrow, scoreThrow = nil, math.huge
+                for _,dirThrow in ipairs(candidates) do
+                    local candidate = root.Position + dirThrow*travel
+                    local fromMark = distance(candidate.X,candidate.Z,originThrow)
+                    local insideArena = not vector(arenaCenter) or distance(candidate.X,candidate.Z,arenaCenter) <= arenaRadius-3
+                    local safeLeg = insideArena and context.v3LegSafe(root.Position,candidate,rt.speedNow or humanoid.WalkSpeed)
+                    local arrival = travel/math.max(16,rt.speedNow or humanoid.WalkSpeed)
+                    local riskThrow = context.v3DangerAt(candidate.X,candidate.Y,candidate.Z,arrival+0.2)
+                    if safeLeg and riskThrow < 3 then
+                        local score = math.max(0,desiredRadius-fromMark)*10 + riskThrow*100
+                        if score < scoreThrow then chosenThrow,scoreThrow=dirThrow,score end
+                    end
+                end
+                if not chosenThrow then
+                    chosenThrow = side
+                    if context.v3DangerAt(root.Position.X+side.X*8,root.Position.Y,root.Position.Z+side.Z*8,0.4)
+                        > context.v3DangerAt(root.Position.X-side.X*8,root.Position.Y,root.Position.Z-side.Z*8,0.4) then
+                        chosenThrow=-side
+                    end
+                end
+                state.heading,state.headingActive=chosenThrow,true
+                state.dodgeReason='Mighty Lance Throw: clear red and orange circles'
+                if context.MV then context.MV.cmdDir,context.MV.cmdAt,context.MV.driving=chosenThrow,now,true end
+                context.LC.steer(chosenThrow)
+                humanoid:Move(chosenThrow,false)
+                pcall(function() context.setState('VOIDSBANE V3: clear Mighty Lance Throw circles') end)
+                return
+            else
+                throwState.markedAt,throwState.point,throwState.lastImpactAt=nil,nil,nil
+            end
+        end
         -- r16: telegraphed red floor lane. Capture the actual rendered warning geometry,
         -- not just the server hazard packet; the red decal precedes damage.
         local redLane=nil
@@ -170306,7 +170366,6 @@ __vortexStage('loadConfig OK')
 context.CFG.hitboxesMinimapOnly=true
 context.CFG.visuals=false
 context.CFG.minimap=true
-context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
 context.CFG.minimapRange=180
@@ -170466,10 +170525,12 @@ do
     if not ok then error('[VORTEX STARTUP: clientDiagnostics] '..tostring(err),0) end
 end
 -- Apply after UI defaults/profile restoration as well.
-context.CFG.mapBg3D=false
 context.CFG.mapBlankScreen=false
 context.CFG.minimapSmoothHz=15
-if context.MM and context.MM.setView then context.MM.setView('2d') end
+if context.MM and context.MM.setView then
+    local selectedMapView = context.CFG.mapBlankScreen==true and 'blank' or (context.CFG.mapBg3D~=false and context.CFG.renderOff~=true and '3d' or '2d')
+    context.MM.setView(selectedMapView)
+end
 -- VORTEX r32: restore original full-featured UI rather than the incomplete r23 replacement.
 -- The legacy UI includes its original controls, callbacks, sliders and party settings.
 __vortexStage('restoring complete original UI')
